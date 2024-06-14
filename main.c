@@ -1,11 +1,13 @@
-#include "framework.h"
-#include "wgpu/webgpu.h"
-#include "wgpu/wgpu.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "framework.h"
+#include "wgpu/webgpu.h"
+#include "wgpu/wgpu.h"
+#include "cglm/include/cglm/cglm.h"
 
 #if defined(GLFW_EXPOSE_NATIVE_COCOA)
 #include <Foundation/Foundation.h>
@@ -27,9 +29,15 @@ struct demo {
   WGPUSurfaceConfiguration config;
 };
 
-static void handle_request_adapter(WGPURequestAdapterStatus status,
-                                   WGPUAdapter adapter, char const *message,
-                                   void *userdata) {
+struct uniforms {
+    mat4 view;
+    mat4 projection;
+};
+
+static void handle_request_adapter(
+    WGPURequestAdapterStatus status,
+    WGPUAdapter adapter, char const *message,
+    void *userdata) {
   if (status == WGPURequestAdapterStatus_Success) {
     struct demo *demo = userdata;
     demo->adapter = adapter;
@@ -38,9 +46,10 @@ static void handle_request_adapter(WGPURequestAdapterStatus status,
            message);
   }
 }
-static void handle_request_device(WGPURequestDeviceStatus status,
-                                  WGPUDevice device, char const *message,
-                                  void *userdata) {
+static void handle_request_device(
+    WGPURequestDeviceStatus status,
+    WGPUDevice device, char const *message,
+    void *userdata) {
   if (status == WGPURequestDeviceStatus_Success) {
     struct demo *demo = userdata;
     demo->device = device;
@@ -49,14 +58,14 @@ static void handle_request_device(WGPURequestDeviceStatus status,
            message);
   }
 }
-static void handle_glfw_key(GLFWwindow *window, int key, int scancode,
-                            int action, int mods) {
+static void handle_glfw_key(
+    GLFWwindow *window, int key, int scancode,
+    int action, int mods) {
   UNUSED(scancode)
   UNUSED(mods)
   if (key == GLFW_KEY_R && (action == GLFW_PRESS || action == GLFW_REPEAT)) {
     struct demo *demo = glfwGetWindowUserPointer(window);
-    if (!demo || !demo->instance)
-      return;
+    if (!demo || !demo->instance) return;
 
     WGPUGlobalReport report;
     wgpuGenerateReport(demo->instance, &report);
@@ -70,8 +79,7 @@ static void handle_glfw_framebuffer_size(GLFWwindow *window, int width,
   }
 
   struct demo *demo = glfwGetWindowUserPointer(window);
-  if (!demo)
-    return;
+  if (!demo) return;
 
   demo->config.width = width;
   demo->config.height = height;
@@ -84,8 +92,7 @@ int main(int argc, char *argv[]) {
   UNUSED(argv)
   frmwrk_setup_logging(WGPULogLevel_Warn);
 
-  if (!glfwInit())
-    exit(EXIT_FAILURE);
+  if (!glfwInit()) exit(EXIT_FAILURE);
 
   struct demo demo = {0};
   demo.instance = wgpuCreateInstance(NULL);
@@ -200,9 +207,106 @@ int main(int argc, char *argv[]) {
       frmwrk_load_shader_module(demo.device, "shader.wgsl");
   assert(shader_module);
 
+  struct uniforms uniforms = {
+      .view = GLM_MAT4_IDENTITY_INIT,
+      .projection = GLM_MAT4_IDENTITY_INIT,
+  };
+
+  WGPUBuffer uniform_buffer = frmwrk_device_create_buffer_init(
+      demo.device, &(const frmwrk_buffer_init_descriptor){
+                       .label = "Uniform Buffer",
+                       .content = (void *)&uniforms,
+                       .content_size = sizeof(uniforms),
+                       .usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst,
+                   });
+
+
+WGPUBindGroupLayoutEntry bgl_entries[] = {
+  [0] = {
+    .binding = 0,
+    .visibility = WGPUShaderStage_Vertex,
+    .buffer = {
+      .type = WGPUBufferBindingType_Uniform,
+    },
+  },
+};
+WGPUBindGroupLayoutDescriptor bgl_desc = {
+  .entryCount = sizeof(bgl_entries) / sizeof(bgl_entries[0]),
+  .entries = bgl_entries,
+};
+WGPUBindGroupLayout bgl = wgpuDeviceCreateBindGroupLayout(demo.device, &bgl_desc);
+
+WGPUBindGroupEntry bg_entries[] = {
+  [0] = {
+    .binding = 0,
+    .buffer = uniform_buffer,
+    .size = sizeof(uniforms),
+  },
+};
+WGPUBindGroupDescriptor bg_desc = {
+  .layout = bgl,
+  .entryCount = sizeof(bg_entries) / sizeof(bg_entries[0]),
+  .entries = bg_entries,
+};
+WGPUBindGroup bg = wgpuDeviceCreateBindGroup(demo.device, &bg_desc);
+
+
+  static const WGPUVertexAttribute vertex_attributes[] = {
+      {
+          .format = WGPUVertexFormat_Float32x3,
+          .offset = 0,
+          .shaderLocation = 0,
+      },
+      {
+          .format = WGPUVertexFormat_Float32x4,
+          .offset = 0 + 12,  // 0 + sizeof(Float32x3)
+          .shaderLocation = 1,
+      },
+  };
+
+  // Define your vertices
+  float vertices[] = {
+      // x, y, z, r, g, b, a
+      -0.5f,
+      -0.5f,
+      0.0f,
+      1.0f,
+      0.0f,
+      0.0f,
+      1.0f,
+      0.5f,
+      -0.5f,
+      0.0f,
+      0.0f,
+      1.0f,
+      0.0f,
+      1.0f,
+      0.0f,
+      0.5f,
+      0.0f,
+      0.0f,
+      0.0f,
+      1.0f,
+      1.0f,
+  };
+
+  WGPUBuffer vertex_buffer = frmwrk_device_create_buffer_init(
+      demo.device, &(const frmwrk_buffer_init_descriptor){
+                       .label = "Vertex Buffer",
+                       .content = (void *)vertices,
+                       .content_size = sizeof(vertices),
+                       .usage = WGPUBufferUsage_Vertex,
+                   });
+
+
   WGPUPipelineLayout pipeline_layout = wgpuDeviceCreatePipelineLayout(
       demo.device, &(const WGPUPipelineLayoutDescriptor){
                        .label = "pipeline_layout",
+                       .bindGroupLayoutCount = 1,
+                       .bindGroupLayouts =
+                           (const WGPUBindGroupLayout[]){
+                               bgl,
+                           },
                    });
   assert(pipeline_layout);
 
@@ -218,6 +322,17 @@ int main(int argc, char *argv[]) {
               (const WGPUVertexState){
                   .module = shader_module,
                   .entryPoint = "vs_main",
+                  .bufferCount = 1,
+                  .buffers =
+                      (const WGPUVertexBufferLayout[]){
+                          (const WGPUVertexBufferLayout){
+                              .arrayStride = 3 * 4 + 4 * 4,
+                              .stepMode = WGPUVertexStepMode_Vertex,
+                              .attributeCount = sizeof(vertex_attributes) /
+                                                sizeof(vertex_attributes[0]),
+                              .attributes = vertex_attributes,
+                          },
+                      },
               },
           .fragment =
               &(const WGPUFragmentState){
@@ -261,38 +376,58 @@ int main(int argc, char *argv[]) {
 
   wgpuSurfaceConfigure(demo.surface, &demo.config);
 
+  float t = 0.0f;
+
   while (!glfwWindowShouldClose(window)) {
+    t += 0.01f;
+
     glfwPollEvents();
+
+    vec3 eye    = {sin(t), 0.5f, cos(t)};
+    vec3 center = {0.0f, 0.0f, 0.0f};
+    vec3 up     = {0.0f, 1.0f, 0.0f};
+
+    mat4 view;
+    glm_lookat(eye, center, up, view);
+    memcpy(&uniforms.view, view, sizeof(view));
+
+    mat4 projection;
+    glm_perspective(
+      GLM_PI_2, (float)demo.config.width / (float)demo.config.height, 0.01f, 100.0f, projection);
+    memcpy(&uniforms.projection, projection, sizeof(projection));
+
+    // Send uniforms to GPU
+    wgpuQueueWriteBuffer(queue, uniform_buffer, 0, &uniforms, sizeof(uniforms));
 
     WGPUSurfaceTexture surface_texture;
     wgpuSurfaceGetCurrentTexture(demo.surface, &surface_texture);
     switch (surface_texture.status) {
-    case WGPUSurfaceGetCurrentTextureStatus_Success:
-      // All good, could check for `surface_texture.suboptimal` here.
-      break;
-    case WGPUSurfaceGetCurrentTextureStatus_Timeout:
-    case WGPUSurfaceGetCurrentTextureStatus_Outdated:
-    case WGPUSurfaceGetCurrentTextureStatus_Lost: {
-      // Skip this frame, and re-configure surface.
-      if (surface_texture.texture != NULL) {
-        wgpuTextureRelease(surface_texture.texture);
+      case WGPUSurfaceGetCurrentTextureStatus_Success:
+        // All good, could check for `surface_texture.suboptimal` here.
+        break;
+      case WGPUSurfaceGetCurrentTextureStatus_Timeout:
+      case WGPUSurfaceGetCurrentTextureStatus_Outdated:
+      case WGPUSurfaceGetCurrentTextureStatus_Lost: {
+        // Skip this frame, and re-configure surface.
+        if (surface_texture.texture != NULL) {
+          wgpuTextureRelease(surface_texture.texture);
+        }
+        int width, height;
+        glfwGetWindowSize(window, &width, &height);
+        if (width != 0 && height != 0) {
+          demo.config.width = width;
+          demo.config.height = height;
+          wgpuSurfaceConfigure(demo.surface, &demo.config);
+        }
+        continue;
       }
-      int width, height;
-      glfwGetWindowSize(window, &width, &height);
-      if (width != 0 && height != 0) {
-        demo.config.width = width;
-        demo.config.height = height;
-        wgpuSurfaceConfigure(demo.surface, &demo.config);
-      }
-      continue;
-    }
-    case WGPUSurfaceGetCurrentTextureStatus_OutOfMemory:
-    case WGPUSurfaceGetCurrentTextureStatus_DeviceLost:
-    case WGPUSurfaceGetCurrentTextureStatus_Force32:
-      // Fatal error
-      printf(LOG_PREFIX " get_current_texture status=%#.8x\n",
-             surface_texture.status);
-      abort();
+      case WGPUSurfaceGetCurrentTextureStatus_OutOfMemory:
+      case WGPUSurfaceGetCurrentTextureStatus_DeviceLost:
+      case WGPUSurfaceGetCurrentTextureStatus_Force32:
+        // Fatal error
+        printf(LOG_PREFIX " get_current_texture status=%#.8x\n",
+               surface_texture.status);
+        abort();
     }
     assert(surface_texture.texture);
 
@@ -308,28 +443,32 @@ int main(int argc, char *argv[]) {
 
     WGPURenderPassEncoder render_pass_encoder =
         wgpuCommandEncoderBeginRenderPass(
-            command_encoder, &(const WGPURenderPassDescriptor){
-                                 .label = "render_pass_encoder",
-                                 .colorAttachmentCount = 1,
-                                 .colorAttachments =
-                                     (const WGPURenderPassColorAttachment[]){
-                                         (const WGPURenderPassColorAttachment){
-                                             .view = frame,
-                                             .loadOp = WGPULoadOp_Clear,
-                                             .storeOp = WGPUStoreOp_Store,
-                                            //  .depthSlice = WGPU_DEPTH_SLICE_UNDEFINED,
-                                             .clearValue =
-                                                 (const WGPUColor){
-                                                     .r = 0.0,
-                                                     .g = 1.0,
-                                                     .b = 0.0,
-                                                     .a = 1.0,
-                                                 },
-                                         },
-                                     },
-                             });
+            command_encoder,
+            &(const WGPURenderPassDescriptor){
+                .label = "render_pass_encoder",
+                .colorAttachmentCount = 1,
+                .colorAttachments =
+                    (const WGPURenderPassColorAttachment[]){
+                        (const WGPURenderPassColorAttachment){
+                            .view = frame,
+                            .loadOp = WGPULoadOp_Clear,
+                            .storeOp = WGPUStoreOp_Store,
+                            //  .depthSlice = WGPU_DEPTH_SLICE_UNDEFINED,
+                            .clearValue =
+                                (const WGPUColor){
+                                    .r = 0.0,
+                                    .g = 0.0,
+                                    .b = 0.0,
+                                    .a = 1.0,
+                                },
+                        },
+                    },
+            });
     assert(render_pass_encoder);
 
+    wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, vertex_buffer,
+                                         0, WGPU_WHOLE_SIZE);
+    wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, bg, 0, NULL);
     wgpuRenderPassEncoderSetPipeline(render_pass_encoder, render_pipeline);
     wgpuRenderPassEncoderDraw(render_pass_encoder, 3, 1, 0, 0);
     wgpuRenderPassEncoderEnd(render_pass_encoder);
@@ -358,6 +497,8 @@ int main(int argc, char *argv[]) {
   wgpuDeviceRelease(demo.device);
   wgpuAdapterRelease(demo.adapter);
   wgpuSurfaceRelease(demo.surface);
+  wgpuBufferRelease(vertex_buffer);
+  wgpuBufferRelease(uniform_buffer);
   glfwDestroyWindow(window);
   wgpuInstanceRelease(demo.instance);
   glfwTerminate();
