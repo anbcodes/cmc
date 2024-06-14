@@ -33,3 +33,5 @@ before
 gcc main.c framework.c wgpu/libwgpu_native.a GLFW/lib/libglfw3.a -lm
 ```
 * This creates the executable `a.out`
+
+You also should run `git clone https://github.com/recp/cglm.git` to get cglm. It works as a header-only library.
