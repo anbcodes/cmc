@@ -1,12 +1,13 @@
 #ifndef FRAMEWORK_H
 #define FRAMEWORK_H
 
-#include "wgpu/wgpu.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "wgpu/wgpu.h"
 
 #define UNUSED(x) (void)x;
 
@@ -21,6 +22,7 @@ void frmwrk_setup_logging(WGPULogLevel level);
 WGPUShaderModule frmwrk_load_shader_module(WGPUDevice device, const char *name);
 void frmwrk_print_global_report(WGPUGlobalReport report);
 WGPUBuffer frmwrk_device_create_buffer_init(
-    WGPUDevice device, const frmwrk_buffer_init_descriptor *descriptor);
+  WGPUDevice device, const frmwrk_buffer_init_descriptor *descriptor
+);
 
-#endif // FRAMEWORK_H
+#endif  // FRAMEWORK_H

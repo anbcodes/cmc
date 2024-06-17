@@ -22,6 +22,7 @@
 #define LOG_PREFIX "[triangle]"
 
 const float TURN_SPEED = 0.002f;
+const float TICKS_PER_SECOND = 60.0f;
 
 struct demo {
   WGPUInstance instance;
@@ -33,6 +34,9 @@ struct demo {
   bool mouse_captured;
   vec2 last_mouse;
   float elevation;
+  float movement_speed;
+  vec3 position;
+  vec3 velocity;
   vec3 up;
   vec3 forward;
   vec3 right;
@@ -162,6 +166,74 @@ static void handle_glfw_set_scroll(GLFWwindow *window, double xoffset, double yo
   UNUSED(yoffset)
 }
 
+void update_player_position(struct demo *demo, float dt) {
+  vec3 desired_velocity = {0};
+  float speed = demo->movement_speed * TICKS_PER_SECOND;
+  if (demo->keys[GLFW_KEY_D]) {
+    vec3 delta;
+    glm_vec3_scale(demo->right, speed, delta);
+    glm_vec3_add(desired_velocity, delta, desired_velocity);
+  }
+  if (demo->keys[GLFW_KEY_A]) {
+    vec3 delta;
+    glm_vec3_scale(demo->right, speed, delta);
+    glm_vec3_sub(desired_velocity, delta, desired_velocity);
+  }
+  if (demo->keys[GLFW_KEY_W]) {
+    vec3 delta;
+    glm_vec3_scale(demo->forward, speed, delta);
+    glm_vec3_add(desired_velocity, delta, desired_velocity);
+  }
+  if (demo->keys[GLFW_KEY_S]) {
+    vec3 delta;
+    glm_vec3_scale(demo->forward, speed, delta);
+    glm_vec3_sub(desired_velocity, delta, desired_velocity);
+  }
+  printf(LOG_PREFIX " velocity x=%.1f y=%.1f z=%.1f\n", desired_velocity[0], desired_velocity[1], desired_velocity[2]);
+  // bool moving_vertical = false;
+  // if (keys_.count(GLFW_KEY_SPACE) > 0) {
+  //   desired_velocity += player_speed_ * up_;
+  //   moving_vertical = true;
+  // }
+  // if (keys_.count(GLFW_KEY_LEFT_SHIFT) > 0) {
+  //   desired_velocity -= player_speed_ * up_;
+  //   moving_vertical = true;
+  // }
+  // if (play_mode_ == PlayMode::kFly || moving_vertical) {
+  glm_vec3_mix(demo->velocity, desired_velocity, 0.8f, demo->velocity);
+  // } else {
+  //   // If there's gravity, we want to keep the up_ component of the velocity but
+  //   // slow down the forward_ component
+  //   glm::vec3 up_component = glm::dot(player_gaussian_.velocity, up_) * up_;
+  //   glm::vec3 forward_component =
+  //       glm::dot(player_gaussian_.velocity, forward_) * forward_;
+  //   player_gaussian_.velocity =
+  //       up_component + 0.8f * desired_velocity + 0.2f * forward_component;
+  // }
+
+  // Update position
+  vec3 delta_position;
+  glm_vec3_scale(demo->velocity, dt, delta_position);
+  glm_vec3_add(demo->position, delta_position, demo->position);
+  // demo->position += player_gaussian_.velocity * dt;
+  // std::cout << "Player position: " << player_gaussian_.position.x << " "
+  //           << player_gaussian_.position.y << " " << player_gaussian_.position.z
+  //           << " " << std::endl;
+
+  // // Update up_ vector
+  // up_ = glm::normalize(player_gaussian_.position);
+  // right_ = glm::normalize(glm::cross(forward_, up_));
+  // forward_ = glm::normalize(glm::cross(up_, right_));
+  // look_ = glm::normalize(glm::rotate(forward_, elevation_, right_));
+
+  // // Gravity
+  // if (play_mode_ == PlayMode::kNormal) {
+  //   player_gaussian_.velocity += gravity_ * dt * up_;
+  // }
+
+  // CollidePlayer(player_gaussian_, player_eye_height_, gaussians_);
+}
+
 int main(int argc, char *argv[]) {
   UNUSED(argc)
   UNUSED(argv)
@@ -170,6 +242,8 @@ int main(int argc, char *argv[]) {
   if (!glfwInit()) exit(EXIT_FAILURE);
 
   struct demo demo = {
+    .movement_speed = 0.1f,
+    .position = {0.0f, 0.0f, -1.0f},
     .up = {0.0f, 1.0f, 0.0f},
     .forward = {0.0f, 0.0f, 1.0f},
     .right = {1.0f, 0.0f, 0.0f},
@@ -467,19 +541,26 @@ int main(int argc, char *argv[]) {
 
   wgpuSurfaceConfigure(demo.surface, &demo.config);
 
-  float t = 0.0f;
+  double lastTime = glfwGetTime();
+  double targetDeltaTime = 1.0 / 60.0;
 
   while (!glfwWindowShouldClose(window)) {
-    t += 0.01f;
+    double currentTime = glfwGetTime();
+    double deltaTime = currentTime - lastTime;
+    if (deltaTime < targetDeltaTime) {
+      continue;
+    }
+    lastTime = currentTime;
+    printf(LOG_PREFIX " delta_time=%.6f\n", deltaTime);
 
     glfwPollEvents();
+    update_player_position(&demo, (float)deltaTime);
 
-    vec3 eye = {0.0f, 0.0f, -1.0f};
     vec3 center;
-    glm_vec3_add(eye, demo.look, center);
+    glm_vec3_add(demo.position, demo.look, center);
 
     mat4 view;
-    glm_lookat(eye, center, demo.up, view);
+    glm_lookat(demo.position, center, demo.up, view);
     memcpy(&uniforms.view, view, sizeof(view));
 
     mat4 projection;
