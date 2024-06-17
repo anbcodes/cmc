@@ -21,12 +21,22 @@
 
 #define LOG_PREFIX "[triangle]"
 
+const float TURN_SPEED = 0.002f;
+
 struct demo {
   WGPUInstance instance;
   WGPUSurface surface;
   WGPUAdapter adapter;
   WGPUDevice device;
   WGPUSurfaceConfiguration config;
+  bool keys[GLFW_KEY_LAST + 1];
+  bool mouse_captured;
+  vec2 last_mouse;
+  float elevation;
+  vec3 up;
+  vec3 forward;
+  vec3 right;
+  vec3 look;
 };
 
 struct uniforms {
@@ -63,13 +73,29 @@ static void handle_glfw_key(
     int action, int mods) {
   UNUSED(scancode)
   UNUSED(mods)
-  if (key == GLFW_KEY_R && (action == GLFW_PRESS || action == GLFW_REPEAT)) {
-    struct demo *demo = glfwGetWindowUserPointer(window);
-    if (!demo || !demo->instance) return;
+  struct demo *demo = glfwGetWindowUserPointer(window);
+  if (!demo || !demo->instance) return;
 
-    WGPUGlobalReport report;
-    wgpuGenerateReport(demo->instance, &report);
-    frmwrk_print_global_report(report);
+  switch (action) {
+    case GLFW_PRESS:
+      printf(LOG_PREFIX " key=%d press\n", key);
+      demo->keys[key] = true;
+      switch (key) {
+        case GLFW_KEY_ESCAPE:
+          glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+          demo->mouse_captured = false;
+          break;
+        case GLFW_KEY_R:
+          WGPUGlobalReport report;
+          wgpuGenerateReport(demo->instance, &report);
+          frmwrk_print_global_report(report);
+          break;
+      }
+      break;
+    case GLFW_RELEASE:
+      printf(LOG_PREFIX " key=%d release\n", key);
+      demo->keys[key] = false;
+      break;
   }
 }
 static void handle_glfw_framebuffer_size(GLFWwindow *window, int width,
@@ -87,6 +113,55 @@ static void handle_glfw_framebuffer_size(GLFWwindow *window, int width,
   wgpuSurfaceConfigure(demo->surface, &demo->config);
 }
 
+static void handle_glfw_cursor_pos(GLFWwindow *window, double xpos, double ypos) {
+  struct demo *demo = glfwGetWindowUserPointer(window);
+  if (!demo) return;
+
+  vec2 current = {xpos, ypos};
+  if (!demo->mouse_captured) {
+    glm_vec2_copy(current, demo->last_mouse);
+    return;
+  };
+
+  printf(LOG_PREFIX " cursor x=%.1f y=%.1f\n", xpos, ypos);
+
+  vec2 delta;
+  glm_vec2_sub(current, demo->last_mouse, delta);
+  glm_vec2_copy(current, demo->last_mouse);
+  demo->elevation -= delta[1] * TURN_SPEED;
+  demo->elevation = glm_clamp(demo->elevation, -GLM_PI_2 + 0.1f, GLM_PI_2 - 0.1f);
+
+  float delta_azimuth = -delta[0] * TURN_SPEED;
+  glm_vec3_rotate(demo->forward, delta_azimuth, demo->up);
+  glm_vec3_normalize(demo->forward);
+  glm_vec3_cross(demo->forward, demo->up, demo->right);
+  glm_vec3_normalize(demo->right);
+  glm_vec3_copy(demo->forward, demo->look);
+  glm_vec3_rotate(demo->look, demo->elevation, demo->right);
+  glm_vec3_normalize(demo->look);
+}
+
+static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int action, int mods) {
+  UNUSED(mods)
+  struct demo *demo = glfwGetWindowUserPointer(window);
+  if (!demo) return;
+
+  if (button == GLFW_MOUSE_BUTTON_LEFT) {
+    switch (action) {
+      case GLFW_PRESS:
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        demo->mouse_captured = true;
+        break;
+    }
+  }
+}
+
+static void handle_glfw_set_scroll(GLFWwindow *window, double xoffset, double yoffset) {
+  UNUSED(window)
+  UNUSED(xoffset)
+  UNUSED(yoffset)
+}
+
 int main(int argc, char *argv[]) {
   UNUSED(argc)
   UNUSED(argv)
@@ -94,7 +169,13 @@ int main(int argc, char *argv[]) {
 
   if (!glfwInit()) exit(EXIT_FAILURE);
 
-  struct demo demo = {0};
+  struct demo demo = {
+    .up = {0.0f, 1.0f, 0.0f},
+    .forward = {0.0f, 0.0f, 1.0f},
+    .right = {1.0f, 0.0f, 0.0f},
+    .look = {0.0f, 0.0f, 1.0f},
+  };
+
   demo.instance = wgpuCreateInstance(NULL);
   assert(demo.instance);
 
@@ -106,6 +187,9 @@ int main(int argc, char *argv[]) {
   glfwSetWindowUserPointer(window, (void *)&demo);
   glfwSetKeyCallback(window, handle_glfw_key);
   glfwSetFramebufferSizeCallback(window, handle_glfw_framebuffer_size);
+  glfwSetCursorPosCallback(window, handle_glfw_cursor_pos);
+  glfwSetMouseButtonCallback(window, handle_glfw_set_mouse_button);
+  glfwSetScrollCallback(window, handle_glfw_set_scroll);
 
 #if defined(GLFW_EXPOSE_NATIVE_COCOA)
   {
@@ -383,12 +467,12 @@ WGPUBindGroup bg = wgpuDeviceCreateBindGroup(demo.device, &bg_desc);
 
     glfwPollEvents();
 
-    vec3 eye    = {sin(t), 0.5f, cos(t)};
-    vec3 center = {0.0f, 0.0f, 0.0f};
-    vec3 up     = {0.0f, 1.0f, 0.0f};
+    vec3 eye    = {0.0f, 0.0f, -1.0f};
+    vec3 center;
+    glm_vec3_add(eye, demo.look, center);
 
     mat4 view;
-    glm_lookat(eye, center, up, view);
+    glm_lookat(eye, center, demo.up, view);
     memcpy(&uniforms.view, view, sizeof(view));
 
     mat4 projection;
