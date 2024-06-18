@@ -7,7 +7,7 @@
 * From the main directory, run `git clone https://github.com/recp/cglm.git` to get cglm. It works as a header-only library.
 * To compile
 ```
-gcc main.c framework.c wgpu/libwgpu_native.a GLFW/lib/libglfw3.a -lm
+gcc main.c framework.c chunk.c lodepng/lodepng.c wgpu/libwgpu_native.a GLFW/lib/libglfw3.a -lm
 ```
 * This creates the executable `a.out`
 
