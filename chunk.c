@@ -99,6 +99,7 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
           int dv[3] = {0};
           dv[v] = h;
           int q = section->num_quads * 4 * FLOATS_PER_VERTEX;
+          int material = abs(m);
           quads[q + 0] = x[0];
           quads[q + 1] = x[1];
           quads[q + 2] = x[2];
@@ -108,7 +109,7 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
           quads[q + 6] = 1.0f;
           quads[q + 7] = w;
           quads[q + 8] = h;
-          quads[q + 9] = m;
+          quads[q + 9] = material;
           q += FLOATS_PER_VERTEX;
           quads[q + 0] = x[0] + du[0];
           quads[q + 1] = x[1] + du[1];
@@ -119,7 +120,7 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
           quads[q + 6] = 1.0f;
           quads[q + 7] = 0.0f;
           quads[q + 8] = h;
-          quads[q + 9] = m;
+          quads[q + 9] = material;
           q += FLOATS_PER_VERTEX;
           quads[q + 0] = x[0] + du[0] + dv[0];
           quads[q + 1] = x[1] + du[1] + dv[1];
@@ -130,7 +131,7 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
           quads[q + 6] = 1.0f;
           quads[q + 7] = 0.0f;
           quads[q + 8] = 0.0f;
-          quads[q + 9] = m;
+          quads[q + 9] = material;
           q += FLOATS_PER_VERTEX;
           quads[q + 0] = x[0] + dv[0];
           quads[q + 1] = x[1] + dv[1];
@@ -141,7 +142,7 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
           quads[q + 6] = 1.0f;
           quads[q + 7] = w;
           quads[q + 8] = 0.0f;
-          quads[q + 9] = m;
+          quads[q + 9] = material;
           section->num_quads += 1;
 
           // Zero out mask

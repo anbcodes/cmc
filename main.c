@@ -58,7 +58,7 @@ unsigned char *load_image(const char *filename, unsigned *width, unsigned *heigh
   error = lodepng_load_file(&png, &pngsize, filename);
   if (!error) {
     unsigned char *image = 0;
-    error = lodepng_decode24(&image, width, height, png, pngsize);
+    error = lodepng_decode32(&image, width, height, png, pngsize);
     free(png);
     if (!error) {
       return image;
@@ -387,6 +387,92 @@ int main(int argc, char *argv[]) {
     frmwrk_load_shader_module(demo.device, "shader.wgsl");
   assert(shader_module);
 
+  unsigned int texture_width;
+  unsigned int texture_height;
+  unsigned char *image_data = load_image("texture-2.png", &texture_width, &texture_height);
+  printf("texture_width=%u texture_height=%u\n", texture_width, texture_height);
+  // Create the texture.
+  WGPUTextureDescriptor texture_descriptor = {
+    .usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding,
+    .dimension = WGPUTextureDimension_2D,
+    .size = {
+      .width = texture_width,
+      .height = texture_height,
+      .depthOrArrayLayers = 1,
+    },
+    .format = WGPUTextureFormat_RGBA8UnormSrgb,
+    .mipLevelCount = 1,
+    .sampleCount = 1,
+    .viewFormatCount = 0,
+    .viewFormats = NULL,
+  };
+  WGPUTexture texture = wgpuDeviceCreateTexture(demo.device, &texture_descriptor);
+
+  // Create the texture view.
+  WGPUTextureViewDescriptor textureViewDescriptor = {
+    .format = WGPUTextureFormat_RGBA8UnormSrgb,
+    .dimension = WGPUTextureViewDimension_2D,
+    .aspect = WGPUTextureAspect_All,
+    .mipLevelCount = 1,
+    .arrayLayerCount = 1,
+  };
+  WGPUTextureView texture_view = wgpuTextureCreateView(texture, &textureViewDescriptor);
+
+  WGPUSampler texture_sampler = wgpuDeviceCreateSampler(demo.device, &(WGPUSamplerDescriptor){
+    .addressModeU = WGPUAddressMode_Repeat,
+    .addressModeV = WGPUAddressMode_Repeat,
+    .addressModeW = WGPUAddressMode_Repeat,
+    .magFilter = WGPUFilterMode_Nearest,
+    .minFilter = WGPUFilterMode_Nearest,
+    .mipmapFilter = WGPUFilterMode_Nearest,
+    .maxAnisotropy = 1,
+  });
+
+  WGPUBuffer buffer = frmwrk_device_create_buffer_init(
+    demo.device,
+    &(const frmwrk_buffer_init_descriptor){
+      .label = "Texture Buffer",
+      .content = (void *)image_data,
+      .content_size = texture_width * texture_height * 4,
+      .usage = WGPUBufferUsage_CopySrc,
+    }
+  );
+
+  WGPUImageCopyBuffer image_copy_buffer = {
+    .buffer = buffer,
+    .layout = {
+      .bytesPerRow = texture_width * 4,
+      .rowsPerImage = texture_height,
+    },
+  };
+  WGPUImageCopyTexture image_copy_texture = {
+    .texture = texture,
+  };
+  WGPUExtent3D copy_size = {
+    .width = texture_width,
+    .height = texture_height,
+    .depthOrArrayLayers = 1,
+  };
+
+  WGPUTextureDataLayout texture_data_layout = {
+    .offset = 0,
+    .bytesPerRow = texture_width * 4,
+    .rowsPerImage = texture_height,
+  };
+
+  size_t dataSize = texture_width * texture_height * 4;
+
+  wgpuQueueWriteTexture(
+    queue,
+    &image_copy_texture,
+    image_data,
+    dataSize,
+    &texture_data_layout,
+    &copy_size
+  );
+
+  free(image_data);
+
   struct uniforms uniforms = {
     .view = GLM_MAT4_IDENTITY_INIT,
     .projection = GLM_MAT4_IDENTITY_INIT,
@@ -410,11 +496,29 @@ int main(int argc, char *argv[]) {
         .type = WGPUBufferBindingType_Uniform,
       },
     },
+    [1] = {
+      .binding = 1,
+      .visibility = WGPUShaderStage_Fragment,
+      .texture = {
+        .sampleType = WGPUTextureSampleType_Float,
+        .viewDimension = WGPUTextureViewDimension_2D,
+        .multisampled = false,
+      },
+    },
+    [2] = {
+      .binding = 2,
+      .visibility = WGPUShaderStage_Fragment,
+      .sampler = {
+        .type = WGPUSamplerBindingType_Filtering,
+      },
+    },
   };
+
   WGPUBindGroupLayoutDescriptor bgl_desc = {
     .entryCount = sizeof(bgl_entries) / sizeof(bgl_entries[0]),
     .entries = bgl_entries,
   };
+
   WGPUBindGroupLayout bgl = wgpuDeviceCreateBindGroupLayout(demo.device, &bgl_desc);
 
   WGPUBindGroupEntry bg_entries[] = {
@@ -422,6 +526,14 @@ int main(int argc, char *argv[]) {
       .binding = 0,
       .buffer = uniform_buffer,
       .size = sizeof(uniforms),
+    },
+    [1] = {
+      .binding = 1,
+      .textureView = texture_view,
+    },
+    [2] = {
+      .binding = 2,
+      .sampler = texture_sampler,
     },
   };
   WGPUBindGroupDescriptor bg_desc = {
@@ -439,7 +551,7 @@ int main(int argc, char *argv[]) {
     },
     {
       .format = WGPUVertexFormat_Float32x4,
-      .offset = 0 + 12,
+      .offset = 12,
       .shaderLocation = 1,
     },
     {
@@ -449,7 +561,7 @@ int main(int argc, char *argv[]) {
     },
     {
       .format = WGPUVertexFormat_Float32,
-      .offset = 16 + 8,
+      .offset = 12 + 16 + 8,
       .shaderLocation = 3,
     },
   };
@@ -464,7 +576,18 @@ int main(int argc, char *argv[]) {
   for (int x = 0; x < 16; x += 1) {
     for (int z = 0; z < 16; z += 1) {
       for (int y = 0; y < 16; y += 1) {
-        section.data[x + y * 16 + z * 16 * 16] = (z / 2 + x / 2) % 3;
+        double surface = 5.0f * sin(x / 3.0f) * cos(z / 3.0f) + 10.0f;
+        float material = 0;
+        if (y < surface) {
+          material = 1;
+          if (y < surface - 2) {
+            material = 2;
+          }
+          if (y < surface - 5) {
+            material = 3;
+          }
+        }
+        section.data[x + y * 16 + z * 16 * 16] = material;
       }
     }
   }
