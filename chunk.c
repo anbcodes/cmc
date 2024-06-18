@@ -1,10 +1,83 @@
+#include "chunk.h"
+
 #include <stdbool.h>
 #include <stdio.h>
-#include "chunk.h"
+
 #include "framework.h"
 
 // Max quads per chunk section times 4 vertices per quad times floats per vertex
-static float quads[(16 * 16 * 16 * 3) * 4 * FLOATS_PER_VERTEX];
+static float quads[(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * 3) * 4 * FLOATS_PER_VERTEX];
+
+Chunk *world_chunk(World *world, int x, int z) {
+  for (int i = 0; i < MAX_CHUNKS; i += 1) {
+    if (world->chunks[i] == NULL) {
+      continue;
+    }
+    Chunk *chunk = world->chunks[i];
+    if (chunk->x == x && chunk->z == z) {
+      return chunk;
+    }
+  }
+  return NULL;
+}
+
+void world_target_block(World *world, vec3 position, vec3 look, float reach, vec3 target, vec3 normal, int *material) {
+  int chunk_x = (int)floor(position[0] / CHUNK_SIZE);
+  int chunk_z = (int)floor(position[2] / CHUNK_SIZE);
+  Chunk *chunk = world_chunk(world, chunk_x, chunk_z);
+  if (chunk == NULL) {
+    *material = 0;
+    return;
+  }
+  float distance = 0.0f;
+  vec3 location;
+  glm_vec3_copy(position, location);
+  vec3 delta;
+  glm_vec3_scale(look, 0.01f, delta);
+  while (distance < reach) {
+    int chunk_x = (int)floor(location[0] / CHUNK_SIZE);
+    int chunk_z = (int)floor(location[2] / CHUNK_SIZE);
+    if (chunk->x != chunk_x || chunk->z != chunk_z) {
+      chunk = world_chunk(world, chunk_x, chunk_z);
+      if (chunk == NULL) {
+        *material = 0;
+        return;
+      }
+    }
+    vec3 chunk_location;
+    glm_vec3_sub(location, (vec3){chunk->x * CHUNK_SIZE, 0.0f, chunk->z * CHUNK_SIZE}, chunk_location);
+    int x = (int)floor(chunk_location[0]);
+    int y = (int)floor(chunk_location[1]) % 16;
+    int z = (int)floor(chunk_location[2]);
+    int section = (int)floor(chunk_location[1] / 16) + 4;
+    uint16_t mat = chunk->sections[section].data[x + 16 * (y + 16 * z)];
+    if (mat != 0) {
+      glm_vec3_copy(location, target);
+      glm_vec3_copy((vec3){0.0f, 0.0f, 0.0f}, normal);
+      vec3 low_dist;
+      glm_vec3_sub(location, (vec3){floor(location[0]), floor(location[1]), floor(location[2])}, low_dist);
+      vec3 high_dist;
+      glm_vec3_sub((vec3){ceil(location[0]), ceil(location[1]), ceil(location[2])}, location, high_dist);
+      int min_x_dir = low_dist[0] < high_dist[0] ? -1 : 1;
+      float min_x = low_dist[0] < high_dist[0] ? low_dist[0] : high_dist[0];
+      int min_y_dir = low_dist[1] < high_dist[1] ? -1 : 1;
+      float min_y = low_dist[1] < high_dist[1] ? low_dist[1] : high_dist[1];
+      int min_z_dir = low_dist[2] < high_dist[2] ? -1 : 1;
+      float min_z = low_dist[2] < high_dist[2] ? low_dist[2] : high_dist[2];
+      if (min_x < min_y && min_x < min_z) {
+        normal[0] = min_x_dir;
+      } else if (min_y < min_z) {
+        normal[1] = min_y_dir;
+      } else {
+        normal[2] = min_z_dir;
+      }
+      *material = mat;
+      return;
+    }
+    distance += 0.01f;
+    glm_vec3_add(location, delta, location);
+  }
+}
 
 int face_material_between(int a, int b) {
   if (a == 0 && b == 0) {
@@ -36,6 +109,7 @@ int face_material_between(int a, int b) {
 void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neighbors[3], WGPUDevice device) {
   section->num_quads = 0;
   int mask[16 * 16];
+  vec3 base = {section->x * CHUNK_SIZE, section->y * CHUNK_SIZE, section->z * CHUNK_SIZE};
   for (int d = 0; d < 3; d += 1) {
     int u = (d + 1) % 3;
     int v = (d + 2) % 3;
@@ -43,7 +117,6 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
 
     // Go over all the slices in this dimension
     for (x[d] = 0; x[d] < 16; x[d] += 1) {
-
       // Make a mask
       for (x[u] = 0; x[u] < 16; x[u] += 1) {
         for (x[v] = 0; x[v] < 16; x[v] += 1) {
@@ -67,7 +140,7 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
 
       // Greedily find a quad where the mask is the same value and repeat
       for (int j = 0; j < 16; j += 1) {
-        for (int i = 0; i < 16; ) {
+        for (int i = 0; i < 16;) {
           int m = mask[j + 16 * i];
           if (m == 0) {
             i += 1;
@@ -100,9 +173,9 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
           dv[v] = h;
           int q = section->num_quads * 4 * FLOATS_PER_VERTEX;
           int material = abs(m);
-          quads[q + 0] = x[0];
-          quads[q + 1] = x[1];
-          quads[q + 2] = x[2];
+          quads[q + 0] = base[0] + x[0];
+          quads[q + 1] = base[1] + x[1];
+          quads[q + 2] = base[2] + x[2];
           quads[q + 3] = 1.0f;
           quads[q + 4] = 0.0f;
           quads[q + 5] = 0.0f;
@@ -111,9 +184,9 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
           quads[q + 8] = h;
           quads[q + 9] = material;
           q += FLOATS_PER_VERTEX;
-          quads[q + 0] = x[0] + du[0];
-          quads[q + 1] = x[1] + du[1];
-          quads[q + 2] = x[2] + du[2];
+          quads[q + 0] = base[0] + x[0] + du[0];
+          quads[q + 1] = base[1] + x[1] + du[1];
+          quads[q + 2] = base[2] + x[2] + du[2];
           quads[q + 3] = 0.0f;
           quads[q + 4] = 1.0f;
           quads[q + 5] = 0.0f;
@@ -122,9 +195,9 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
           quads[q + 8] = h;
           quads[q + 9] = material;
           q += FLOATS_PER_VERTEX;
-          quads[q + 0] = x[0] + du[0] + dv[0];
-          quads[q + 1] = x[1] + du[1] + dv[1];
-          quads[q + 2] = x[2] + du[2] + dv[2];
+          quads[q + 0] = base[0] + x[0] + du[0] + dv[0];
+          quads[q + 1] = base[1] + x[1] + du[1] + dv[1];
+          quads[q + 2] = base[2] + x[2] + du[2] + dv[2];
           quads[q + 3] = 1.0f;
           quads[q + 4] = 1.0f;
           quads[q + 5] = 1.0f;
@@ -133,9 +206,9 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
           quads[q + 8] = 0.0f;
           quads[q + 9] = material;
           q += FLOATS_PER_VERTEX;
-          quads[q + 0] = x[0] + dv[0];
-          quads[q + 1] = x[1] + dv[1];
-          quads[q + 2] = x[2] + dv[2];
+          quads[q + 0] = base[0] + x[0] + dv[0];
+          quads[q + 1] = base[1] + x[1] + dv[1];
+          quads[q + 2] = base[2] + x[2] + dv[2];
           quads[q + 3] = 0.0f;
           quads[q + 4] = 0.0f;
           quads[q + 5] = 1.0f;

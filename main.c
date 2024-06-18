@@ -26,7 +26,7 @@
 const float TURN_SPEED = 0.002f;
 const float TICKS_PER_SECOND = 60.0f;
 
-struct demo {
+typedef struct Game {
   WGPUInstance instance;
   WGPUSurface surface;
   WGPUAdapter adapter;
@@ -45,7 +45,8 @@ struct demo {
   vec3 forward;
   vec3 right;
   vec3 look;
-};
+  World world;
+} Game;
 
 struct uniforms {
   mat4 view;
@@ -73,8 +74,8 @@ static void handle_request_adapter(
   void *userdata
 ) {
   if (status == WGPURequestAdapterStatus_Success) {
-    struct demo *demo = userdata;
-    demo->adapter = adapter;
+    Game *game = userdata;
+    game->adapter = adapter;
   } else {
     printf(LOG_PREFIX " request_adapter status=%#.8x message=%s\n", status, message);
   }
@@ -85,8 +86,8 @@ static void handle_request_device(
   void *userdata
 ) {
   if (status == WGPURequestDeviceStatus_Success) {
-    struct demo *demo = userdata;
-    demo->device = device;
+    Game *game = userdata;
+    game->device = device;
   } else {
     printf(LOG_PREFIX " request_device status=%#.8x message=%s\n", status, message);
   }
@@ -97,40 +98,40 @@ static void handle_glfw_key(
 ) {
   UNUSED(scancode)
   UNUSED(mods)
-  struct demo *demo = glfwGetWindowUserPointer(window);
-  if (!demo || !demo->instance) return;
+  Game *game = glfwGetWindowUserPointer(window);
+  if (!game || !game->instance) return;
 
   switch (action) {
     case GLFW_PRESS:
-      demo->keys[key] = true;
+      game->keys[key] = true;
       switch (key) {
         case GLFW_KEY_ESCAPE:
           glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-          demo->mouse_captured = false;
+          game->mouse_captured = false;
           break;
         case GLFW_KEY_R:
           WGPUGlobalReport report;
-          wgpuGenerateReport(demo->instance, &report);
+          wgpuGenerateReport(game->instance, &report);
           frmwrk_print_global_report(report);
           break;
       }
       break;
     case GLFW_RELEASE:
-      demo->keys[key] = false;
+      game->keys[key] = false;
       break;
   }
 }
 
-void update_window_size(struct demo *demo, int width, int height) {
-  if (demo->depth_texture != NULL) {
-    wgpuTextureRelease(demo->depth_texture);
+void update_window_size(Game *game, int width, int height) {
+  if (game->depth_texture != NULL) {
+    wgpuTextureRelease(game->depth_texture);
   }
-  demo->config.width = width;
-  demo->config.height = height;
-  wgpuSurfaceConfigure(demo->surface, &demo->config);
-  demo->depth_texture_descriptor.size.width = demo->config.width;
-  demo->depth_texture_descriptor.size.height = demo->config.height;
-  demo->depth_texture = wgpuDeviceCreateTexture(demo->device, &demo->depth_texture_descriptor);
+  game->config.width = width;
+  game->config.height = height;
+  wgpuSurfaceConfigure(game->surface, &game->config);
+  game->depth_texture_descriptor.size.width = game->config.width;
+  game->depth_texture_descriptor.size.height = game->config.height;
+  game->depth_texture = wgpuDeviceCreateTexture(game->device, &game->depth_texture_descriptor);
 }
 
 static void handle_glfw_framebuffer_size(GLFWwindow *window, int width, int height) {
@@ -138,48 +139,56 @@ static void handle_glfw_framebuffer_size(GLFWwindow *window, int width, int heig
     return;
   }
 
-  struct demo *demo = glfwGetWindowUserPointer(window);
-  if (!demo) return;
+  Game *game = glfwGetWindowUserPointer(window);
+  if (!game) return;
 
-  update_window_size(demo, width, height);
+  update_window_size(game, width, height);
 }
 
 static void handle_glfw_cursor_pos(GLFWwindow *window, double xpos, double ypos) {
-  struct demo *demo = glfwGetWindowUserPointer(window);
-  if (!demo) return;
+  Game *game = glfwGetWindowUserPointer(window);
+  if (!game) return;
 
   vec2 current = {xpos, ypos};
-  if (!demo->mouse_captured) {
-    glm_vec2_copy(current, demo->last_mouse);
+  if (!game->mouse_captured) {
+    glm_vec2_copy(current, game->last_mouse);
     return;
   };
 
   vec2 delta;
-  glm_vec2_sub(current, demo->last_mouse, delta);
-  glm_vec2_copy(current, demo->last_mouse);
-  demo->elevation -= delta[1] * TURN_SPEED;
-  demo->elevation = glm_clamp(demo->elevation, -GLM_PI_2 + 0.1f, GLM_PI_2 - 0.1f);
+  glm_vec2_sub(current, game->last_mouse, delta);
+  glm_vec2_copy(current, game->last_mouse);
+  game->elevation -= delta[1] * TURN_SPEED;
+  game->elevation = glm_clamp(game->elevation, -GLM_PI_2 + 0.1f, GLM_PI_2 - 0.1f);
 
   float delta_azimuth = -delta[0] * TURN_SPEED;
-  glm_vec3_rotate(demo->forward, delta_azimuth, demo->up);
-  glm_vec3_normalize(demo->forward);
-  glm_vec3_cross(demo->forward, demo->up, demo->right);
-  glm_vec3_normalize(demo->right);
-  glm_vec3_copy(demo->forward, demo->look);
-  glm_vec3_rotate(demo->look, demo->elevation, demo->right);
-  glm_vec3_normalize(demo->look);
+  glm_vec3_rotate(game->forward, delta_azimuth, game->up);
+  glm_vec3_normalize(game->forward);
+  glm_vec3_cross(game->forward, game->up, game->right);
+  glm_vec3_normalize(game->right);
+  glm_vec3_copy(game->forward, game->look);
+  glm_vec3_rotate(game->look, game->elevation, game->right);
+  glm_vec3_normalize(game->look);
 }
 
 static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int action, int mods) {
   UNUSED(mods)
-  struct demo *demo = glfwGetWindowUserPointer(window);
-  if (!demo) return;
+  Game *game = glfwGetWindowUserPointer(window);
+  if (!game) return;
 
   if (button == GLFW_MOUSE_BUTTON_LEFT) {
     switch (action) {
       case GLFW_PRESS:
-        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        demo->mouse_captured = true;
+        if (!game->mouse_captured) {
+          glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+          game->mouse_captured = true;
+          break;
+        }
+        float reach = 5.0f;
+        vec3 target;
+        vec3 normal;
+        int material;
+        world_target_block(&game->world, game->position, game->look, reach, target, normal, &material);
         break;
     }
   }
@@ -191,40 +200,40 @@ static void handle_glfw_set_scroll(GLFWwindow *window, double xoffset, double yo
   UNUSED(yoffset)
 }
 
-void update_player_position(struct demo *demo, float dt) {
+void update_player_position(Game *game, float dt) {
   vec3 desired_velocity = {0};
-  float speed = demo->movement_speed * TICKS_PER_SECOND;
-  if (demo->keys[GLFW_KEY_D]) {
+  float speed = game->movement_speed * TICKS_PER_SECOND;
+  if (game->keys[GLFW_KEY_D]) {
     vec3 delta;
-    glm_vec3_scale(demo->right, speed, delta);
+    glm_vec3_scale(game->right, speed, delta);
     glm_vec3_add(desired_velocity, delta, desired_velocity);
   }
-  if (demo->keys[GLFW_KEY_A]) {
+  if (game->keys[GLFW_KEY_A]) {
     vec3 delta;
-    glm_vec3_scale(demo->right, speed, delta);
+    glm_vec3_scale(game->right, speed, delta);
     glm_vec3_sub(desired_velocity, delta, desired_velocity);
   }
-  if (demo->keys[GLFW_KEY_W]) {
+  if (game->keys[GLFW_KEY_W]) {
     vec3 delta;
-    glm_vec3_scale(demo->forward, speed, delta);
+    glm_vec3_scale(game->forward, speed, delta);
     glm_vec3_add(desired_velocity, delta, desired_velocity);
   }
-  if (demo->keys[GLFW_KEY_S]) {
+  if (game->keys[GLFW_KEY_S]) {
     vec3 delta;
-    glm_vec3_scale(demo->forward, speed, delta);
+    glm_vec3_scale(game->forward, speed, delta);
     glm_vec3_sub(desired_velocity, delta, desired_velocity);
   }
-  if (demo->keys[GLFW_KEY_SPACE]) {
+  if (game->keys[GLFW_KEY_SPACE]) {
     vec3 delta;
-    glm_vec3_scale(demo->up, speed, delta);
+    glm_vec3_scale(game->up, speed, delta);
     glm_vec3_add(desired_velocity, delta, desired_velocity);
   }
-  if (demo->keys[GLFW_KEY_LEFT_SHIFT]) {
+  if (game->keys[GLFW_KEY_LEFT_SHIFT]) {
     vec3 delta;
-    glm_vec3_scale(demo->up, speed, delta);
+    glm_vec3_scale(game->up, speed, delta);
     glm_vec3_sub(desired_velocity, delta, desired_velocity);
   }
-  glm_vec3_mix(demo->velocity, desired_velocity, 0.8f, demo->velocity);
+  glm_vec3_mix(game->velocity, desired_velocity, 0.8f, game->velocity);
   //   // If there's gravity, we want to keep the up_ component of the velocity but
   //   // slow down the forward_ component
   //   glm::vec3 up_component = glm::dot(player_gaussian_.velocity, up_) * up_;
@@ -235,8 +244,8 @@ void update_player_position(struct demo *demo, float dt) {
 
   // Update position
   vec3 delta_position;
-  glm_vec3_scale(demo->velocity, dt, delta_position);
-  glm_vec3_add(demo->position, delta_position, demo->position);
+  glm_vec3_scale(game->velocity, dt, delta_position);
+  glm_vec3_add(game->position, delta_position, game->position);
 
   // // Gravity
   // if (play_mode_ == PlayMode::kNormal) {
@@ -253,7 +262,7 @@ int main(int argc, char *argv[]) {
 
   if (!glfwInit()) exit(EXIT_FAILURE);
 
-  struct demo demo = {
+  Game game = {
     .movement_speed = 0.1f,
     .position = {0.0f, 0.0f, -1.0f},
     .up = {0.0f, 1.0f, 0.0f},
@@ -262,15 +271,15 @@ int main(int argc, char *argv[]) {
     .look = {0.0f, 0.0f, 1.0f},
   };
 
-  demo.instance = wgpuCreateInstance(NULL);
-  assert(demo.instance);
+  game.instance = wgpuCreateInstance(NULL);
+  assert(game.instance);
 
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   GLFWwindow *window =
     glfwCreateWindow(640, 480, "triangle [wgpu-native + glfw]", NULL, NULL);
   assert(window);
 
-  glfwSetWindowUserPointer(window, (void *)&demo);
+  glfwSetWindowUserPointer(window, (void *)&game);
   glfwSetKeyCallback(window, handle_glfw_key);
   glfwSetFramebufferSizeCallback(window, handle_glfw_framebuffer_size);
   glfwSetCursorPosCallback(window, handle_glfw_cursor_pos);
@@ -284,8 +293,8 @@ int main(int argc, char *argv[]) {
     [ns_window.contentView setWantsLayer:YES];
     metal_layer = [CAMetalLayer layer];
     [ns_window.contentView setLayer:metal_layer];
-    demo.surface = wgpuInstanceCreateSurface(
-      demo.instance,
+    game.surface = wgpuInstanceCreateSurface(
+      game.instance,
       &(const WGPUSurfaceDescriptor){
         .nextInChain =
           (const WGPUChainedStruct *)&(
@@ -304,8 +313,8 @@ int main(int argc, char *argv[]) {
   if (glfwGetPlatform() == GLFW_PLATFORM_X11) {
     Display *x11_display = glfwGetX11Display();
     Window x11_window = glfwGetX11Window(window);
-    demo.surface = wgpuInstanceCreateSurface(
-      demo.instance,
+    game.surface = wgpuInstanceCreateSurface(
+      game.instance,
       &(const WGPUSurfaceDescriptor){
         .nextInChain =
           (const WGPUChainedStruct *)&(
@@ -324,8 +333,8 @@ int main(int argc, char *argv[]) {
   if (glfwGetPlatform() == GLFW_PLATFORM_WAYLAND) {
     struct wl_display *wayland_display = glfwGetWaylandDisplay();
     struct wl_surface *wayland_surface = glfwGetWaylandWindow(window);
-    demo.surface = wgpuInstanceCreateSurface(
-      demo.instance,
+    game.surface = wgpuInstanceCreateSurface(
+      game.instance,
       &(const WGPUSurfaceDescriptor){
         .nextInChain =
           (const WGPUChainedStruct *)&(
@@ -346,8 +355,8 @@ int main(int argc, char *argv[]) {
   {
     HWND hwnd = glfwGetWin32Window(window);
     HINSTANCE hinstance = GetModuleHandle(NULL);
-    demo.surface = wgpuInstanceCreateSurface(
-      demo.instance,
+    game.surface = wgpuInstanceCreateSurface(
+      game.instance,
       &(const WGPUSurfaceDescriptor){
         .nextInChain =
           (const WGPUChainedStruct *)&(
@@ -366,25 +375,25 @@ int main(int argc, char *argv[]) {
 #else
 #error "Unsupported GLFW native platform"
 #endif
-  assert(demo.surface);
+  assert(game.surface);
 
   wgpuInstanceRequestAdapter(
-    demo.instance,
+    game.instance,
     &(const WGPURequestAdapterOptions){
-      .compatibleSurface = demo.surface,
+      .compatibleSurface = game.surface,
     },
-    handle_request_adapter, &demo
+    handle_request_adapter, &game
   );
-  assert(demo.adapter);
+  assert(game.adapter);
 
-  wgpuAdapterRequestDevice(demo.adapter, NULL, handle_request_device, &demo);
-  assert(demo.device);
+  wgpuAdapterRequestDevice(game.adapter, NULL, handle_request_device, &game);
+  assert(game.device);
 
-  WGPUQueue queue = wgpuDeviceGetQueue(demo.device);
+  WGPUQueue queue = wgpuDeviceGetQueue(game.device);
   assert(queue);
 
   WGPUShaderModule shader_module =
-    frmwrk_load_shader_module(demo.device, "shader.wgsl");
+    frmwrk_load_shader_module(game.device, "shader.wgsl");
   assert(shader_module);
 
   unsigned int texture_width;
@@ -406,7 +415,7 @@ int main(int argc, char *argv[]) {
     .viewFormatCount = 0,
     .viewFormats = NULL,
   };
-  WGPUTexture texture = wgpuDeviceCreateTexture(demo.device, &texture_descriptor);
+  WGPUTexture texture = wgpuDeviceCreateTexture(game.device, &texture_descriptor);
 
   // Create the texture view.
   WGPUTextureViewDescriptor textureViewDescriptor = {
@@ -418,18 +427,18 @@ int main(int argc, char *argv[]) {
   };
   WGPUTextureView texture_view = wgpuTextureCreateView(texture, &textureViewDescriptor);
 
-  WGPUSampler texture_sampler = wgpuDeviceCreateSampler(demo.device, &(WGPUSamplerDescriptor){
-    .addressModeU = WGPUAddressMode_Repeat,
-    .addressModeV = WGPUAddressMode_Repeat,
-    .addressModeW = WGPUAddressMode_Repeat,
-    .magFilter = WGPUFilterMode_Nearest,
-    .minFilter = WGPUFilterMode_Nearest,
-    .mipmapFilter = WGPUFilterMode_Nearest,
-    .maxAnisotropy = 1,
-  });
+  WGPUSampler texture_sampler = wgpuDeviceCreateSampler(game.device, &(WGPUSamplerDescriptor){
+                                                                       .addressModeU = WGPUAddressMode_Repeat,
+                                                                       .addressModeV = WGPUAddressMode_Repeat,
+                                                                       .addressModeW = WGPUAddressMode_Repeat,
+                                                                       .magFilter = WGPUFilterMode_Nearest,
+                                                                       .minFilter = WGPUFilterMode_Nearest,
+                                                                       .mipmapFilter = WGPUFilterMode_Nearest,
+                                                                       .maxAnisotropy = 1,
+                                                                     });
 
   WGPUBuffer buffer = frmwrk_device_create_buffer_init(
-    demo.device,
+    game.device,
     &(const frmwrk_buffer_init_descriptor){
       .label = "Texture Buffer",
       .content = (void *)image_data,
@@ -479,7 +488,7 @@ int main(int argc, char *argv[]) {
   };
 
   WGPUBuffer uniform_buffer = frmwrk_device_create_buffer_init(
-    demo.device,
+    game.device,
     &(const frmwrk_buffer_init_descriptor){
       .label = "Uniform Buffer",
       .content = (void *)&uniforms,
@@ -519,7 +528,7 @@ int main(int argc, char *argv[]) {
     .entries = bgl_entries,
   };
 
-  WGPUBindGroupLayout bgl = wgpuDeviceCreateBindGroupLayout(demo.device, &bgl_desc);
+  WGPUBindGroupLayout bgl = wgpuDeviceCreateBindGroupLayout(game.device, &bgl_desc);
 
   WGPUBindGroupEntry bg_entries[] = {
     [0] = {
@@ -541,7 +550,7 @@ int main(int argc, char *argv[]) {
     .entryCount = sizeof(bg_entries) / sizeof(bg_entries[0]),
     .entries = bg_entries,
   };
-  WGPUBindGroup bg = wgpuDeviceCreateBindGroup(demo.device, &bg_desc);
+  WGPUBindGroup bg = wgpuDeviceCreateBindGroup(game.device, &bg_desc);
 
   static const WGPUVertexAttribute vertex_attributes[] = {
     {
@@ -566,34 +575,63 @@ int main(int argc, char *argv[]) {
     },
   };
 
-  ChunkSection section = {
-    .x = 0,
-    .z = 0,
-    .y = 0,
-    .data = {0},
-  };
-
-  for (int x = 0; x < 16; x += 1) {
-    for (int z = 0; z < 16; z += 1) {
-      for (int y = 0; y < 16; y += 1) {
-        double surface = 5.0f * sin(x / 3.0f) * cos(z / 3.0f) + 10.0f;
-        float material = 0;
-        if (y < surface) {
-          material = 1;
-          if (y < surface - 2) {
-            material = 2;
-          }
-          if (y < surface - 5) {
-            material = 3;
+  int n = 0;
+  for (int cx = -2; cx <= 2; cx += 1) {
+    for (int cz = -2; cz <= 2; cz += 1) {
+      Chunk *chunk = malloc(sizeof(Chunk));
+      game.world.chunks[n] = chunk;
+      n += 1;
+      chunk->x = cx;
+      chunk->z = cz;
+      for (int s = 0; s < 24; s += 1) {
+        chunk->sections[s].x = cx;
+        chunk->sections[s].y = s - 4;
+        chunk->sections[s].z = cz;
+        for (int x = 0; x < 16; x += 1) {
+          for (int z = 0; z < 16; z += 1) {
+            for (int y = 0; y < 16; y += 1) {
+              float wx = cx * CHUNK_SIZE + x;
+              float wy = s * CHUNK_SIZE - 64 + y;
+              float wz = cz * CHUNK_SIZE + z;
+              double surface = 5.0f * sin(wx / 3.0f) * cos(wz / 3.0f) + 10.0f;
+              float material = 0;
+              if (wy < surface) {
+                material = 1;
+                if (wy < surface - 2) {
+                  material = 2;
+                }
+                if (wy < surface - 5) {
+                  material = 3;
+                }
+              }
+              chunk->sections[s].data[x + y * 16 + z * 16 * 16] = material;
+            }
           }
         }
-        section.data[x + y * 16 + z * 16 * 16] = material;
       }
     }
   }
 
-  ChunkSection *neighbors[3] = {NULL, NULL, NULL};
-  chunk_section_buffer_update_mesh(&section, neighbors, demo.device);
+  for (int ci = 0; ci < MAX_CHUNKS; ci += 1) {
+    Chunk *chunk = game.world.chunks[ci];
+    if (chunk == NULL) {
+      continue;
+    }
+    Chunk *x_chunk = world_chunk(&game.world, chunk->x - 1, chunk->z);
+    Chunk *z_chunk = world_chunk(&game.world, chunk->x, chunk->z - 1);
+    if (x_chunk == NULL || z_chunk == NULL) {
+      continue;
+    }
+    for (int s = 0; s < 24; s += 1) {
+      ChunkSection *neighbors[3] = {NULL, NULL, NULL};
+      neighbors[0] = &x_chunk->sections[s];
+      neighbors[2] = &z_chunk->sections[s];
+      if (s > 0) {
+        neighbors[1] = &chunk->sections[s - 1];
+      }
+      chunk_section_buffer_update_mesh(&chunk->sections[s], neighbors, game.device);
+    }
+  }
 
   int max_quads = 16 * 16 * 16 * 3;
   uint32_t indices[max_quads * 6];
@@ -610,7 +648,7 @@ int main(int argc, char *argv[]) {
   int index_count = sizeof(indices) / sizeof(indices[0]);
 
   WGPUBuffer index_buffer = frmwrk_device_create_buffer_init(
-    demo.device,
+    game.device,
     &(const frmwrk_buffer_init_descriptor){
       .label = "index_buffer",
       .content = (void *)indices,
@@ -620,7 +658,7 @@ int main(int argc, char *argv[]) {
   );
 
   WGPUPipelineLayout pipeline_layout = wgpuDeviceCreatePipelineLayout(
-    demo.device,
+    game.device,
     &(const WGPUPipelineLayoutDescriptor){
       .label = "pipeline_layout",
       .bindGroupLayoutCount = 1,
@@ -632,10 +670,10 @@ int main(int argc, char *argv[]) {
   assert(pipeline_layout);
 
   WGPUSurfaceCapabilities surface_capabilities = {0};
-  wgpuSurfaceGetCapabilities(demo.surface, demo.adapter, &surface_capabilities);
+  wgpuSurfaceGetCapabilities(game.surface, game.adapter, &surface_capabilities);
 
   WGPURenderPipeline render_pipeline = wgpuDeviceCreateRenderPipeline(
-    demo.device,
+    game.device,
     &(const WGPURenderPipelineDescriptor){
       .label = "render_pipeline",
       .layout = pipeline_layout,
@@ -692,15 +730,15 @@ int main(int argc, char *argv[]) {
   );
   assert(render_pipeline);
 
-  demo.config = (const WGPUSurfaceConfiguration){
-    .device = demo.device,
+  game.config = (const WGPUSurfaceConfiguration){
+    .device = game.device,
     .usage = WGPUTextureUsage_RenderAttachment,
     .format = surface_capabilities.formats[0],
     .presentMode = WGPUPresentMode_Fifo,
     .alphaMode = surface_capabilities.alphaModes[0],
   };
 
-  demo.depth_texture_descriptor = (WGPUTextureDescriptor){
+  game.depth_texture_descriptor = (WGPUTextureDescriptor){
     .usage = WGPUTextureUsage_RenderAttachment,
     .dimension = WGPUTextureDimension_2D,
     .size = {
@@ -713,7 +751,7 @@ int main(int argc, char *argv[]) {
 
   int width, height;
   glfwGetWindowSize(window, &width, &height);
-  update_window_size(&demo, width, height);
+  update_window_size(&game, width, height);
 
   double lastTime = glfwGetTime();
   double targetDeltaTime = 1.0 / 60.0;
@@ -727,18 +765,18 @@ int main(int argc, char *argv[]) {
     lastTime = currentTime;
 
     glfwPollEvents();
-    update_player_position(&demo, (float)deltaTime);
+    update_player_position(&game, (float)deltaTime);
 
     vec3 center;
-    glm_vec3_add(demo.position, demo.look, center);
+    glm_vec3_add(game.position, game.look, center);
 
     mat4 view;
-    glm_lookat(demo.position, center, demo.up, view);
+    glm_lookat(game.position, center, game.up, view);
     memcpy(&uniforms.view, view, sizeof(view));
 
     mat4 projection;
     glm_perspective(
-      GLM_PI_2, (float)demo.config.width / (float)demo.config.height, 0.01f, 100.0f, projection
+      GLM_PI_2, (float)game.config.width / (float)game.config.height, 0.01f, 100.0f, projection
     );
     memcpy(&uniforms.projection, projection, sizeof(projection));
 
@@ -746,7 +784,7 @@ int main(int argc, char *argv[]) {
     wgpuQueueWriteBuffer(queue, uniform_buffer, 0, &uniforms, sizeof(uniforms));
 
     WGPUSurfaceTexture surface_texture;
-    wgpuSurfaceGetCurrentTexture(demo.surface, &surface_texture);
+    wgpuSurfaceGetCurrentTexture(game.surface, &surface_texture);
     switch (surface_texture.status) {
       case WGPUSurfaceGetCurrentTextureStatus_Success:
         // All good, could check for `surface_texture.suboptimal` here.
@@ -761,7 +799,7 @@ int main(int argc, char *argv[]) {
         int width, height;
         glfwGetWindowSize(window, &width, &height);
         if (width != 0 && height != 0) {
-          update_window_size(&demo, width, height);
+          update_window_size(&game, width, height);
         }
         continue;
       }
@@ -777,11 +815,11 @@ int main(int argc, char *argv[]) {
     WGPUTextureView frame = wgpuTextureCreateView(surface_texture.texture, NULL);
     assert(frame);
 
-    WGPUTextureView depth_frame = wgpuTextureCreateView(demo.depth_texture, NULL);
+    WGPUTextureView depth_frame = wgpuTextureCreateView(game.depth_texture, NULL);
     assert(depth_frame);
 
     WGPUCommandEncoder command_encoder = wgpuDeviceCreateCommandEncoder(
-      demo.device,
+      game.device,
       &(const WGPUCommandEncoderDescriptor){
         .label = "command_encoder",
       }
@@ -818,11 +856,24 @@ int main(int argc, char *argv[]) {
       );
     assert(render_pass_encoder);
 
-    wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, section.vertex_buffer, 0, WGPU_WHOLE_SIZE);
     wgpuRenderPassEncoderSetIndexBuffer(render_pass_encoder, index_buffer, WGPUIndexFormat_Uint32, 0, WGPU_WHOLE_SIZE);
     wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, bg, 0, NULL);
     wgpuRenderPassEncoderSetPipeline(render_pass_encoder, render_pipeline);
-    wgpuRenderPassEncoderDrawIndexed(render_pass_encoder, section.num_quads * 6, 1, 0, 0, 0);
+
+    for (int ci = 0; ci < MAX_CHUNKS; ci += 1) {
+      Chunk *chunk = game.world.chunks[ci];
+      if (chunk == NULL) {
+        continue;
+      }
+      for (int s = 0; s < 24; s += 1) {
+        if (chunk->sections[s].num_quads == 0) {
+          continue;
+        }
+        wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, chunk->sections[s].vertex_buffer, 0, WGPU_WHOLE_SIZE);
+        wgpuRenderPassEncoderDrawIndexed(render_pass_encoder, chunk->sections[s].num_quads * 6, 1, 0, 0, 0);
+      }
+    }
+
     wgpuRenderPassEncoderEnd(render_pass_encoder);
 
     WGPUCommandBuffer command_buffer = wgpuCommandEncoderFinish(
@@ -834,7 +885,7 @@ int main(int argc, char *argv[]) {
     assert(command_buffer);
 
     wgpuQueueSubmit(queue, 1, (const WGPUCommandBuffer[]){command_buffer});
-    wgpuSurfacePresent(demo.surface);
+    wgpuSurfacePresent(game.surface);
 
     wgpuCommandBufferRelease(command_buffer);
     wgpuRenderPassEncoderRelease(render_pass_encoder);
@@ -848,13 +899,13 @@ int main(int argc, char *argv[]) {
   wgpuShaderModuleRelease(shader_module);
   wgpuSurfaceCapabilitiesFreeMembers(surface_capabilities);
   wgpuQueueRelease(queue);
-  wgpuDeviceRelease(demo.device);
-  wgpuAdapterRelease(demo.adapter);
-  wgpuSurfaceRelease(demo.surface);
-  wgpuBufferRelease(section.vertex_buffer);
+  wgpuDeviceRelease(game.device);
+  wgpuAdapterRelease(game.adapter);
+  wgpuSurfaceRelease(game.surface);
+  // chunk_release(chunk);
   wgpuBufferRelease(uniform_buffer);
   glfwDestroyWindow(window);
-  wgpuInstanceRelease(demo.instance);
+  wgpuInstanceRelease(game.instance);
   glfwTerminate();
   return 0;
 }
