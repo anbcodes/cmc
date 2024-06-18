@@ -556,18 +556,23 @@ int main(int argc, char *argv[]) {
         .count = 1,
         .mask = 0xFFFFFFFF,
       },
-      .depthStencil = &(WGPUDepthStencilState){.depthWriteEnabled = true, .depthCompare = WGPUCompareFunction_Less, .format = WGPUTextureFormat_Depth24Plus, .stencilBack = (WGPUStencilFaceState){
-                                                                                                                                                               .compare = WGPUCompareFunction_Always,
-                                                                                                                                                               .failOp = WGPUStencilOperation_Replace,
-                                                                                                                                                               .depthFailOp = WGPUStencilOperation_Replace,
-                                                                                                                                                               .passOp = WGPUStencilOperation_Replace,
-                                                                                                                                                             },
-                                               .stencilFront = (WGPUStencilFaceState){
-                                                 .compare = WGPUCompareFunction_Always,
-                                                 .failOp = WGPUStencilOperation_Replace,
-                                                 .depthFailOp = WGPUStencilOperation_Replace,
-                                                 .passOp = WGPUStencilOperation_Replace,
-                                               }},
+      .depthStencil = &(WGPUDepthStencilState){
+        .depthWriteEnabled = true,
+        .depthCompare = WGPUCompareFunction_Less,
+        .format = WGPUTextureFormat_Depth24Plus,
+        .stencilBack = (WGPUStencilFaceState){
+          .compare = WGPUCompareFunction_Always,
+          .failOp = WGPUStencilOperation_Replace,
+          .depthFailOp = WGPUStencilOperation_Replace,
+          .passOp = WGPUStencilOperation_Replace,
+        },
+        .stencilFront = (WGPUStencilFaceState){
+          .compare = WGPUCompareFunction_Always,
+          .failOp = WGPUStencilOperation_Replace,
+          .depthFailOp = WGPUStencilOperation_Replace,
+          .passOp = WGPUStencilOperation_Replace,
+        },
+      },
     }
   );
   assert(render_pipeline);
