@@ -86,7 +86,6 @@ static void handle_glfw_key(
 
   switch (action) {
     case GLFW_PRESS:
-      // printf(LOG_PREFIX " key=%d press\n", key);
       demo->keys[key] = true;
       switch (key) {
         case GLFW_KEY_ESCAPE:
@@ -101,7 +100,6 @@ static void handle_glfw_key(
       }
       break;
     case GLFW_RELEASE:
-      // printf(LOG_PREFIX " key=%d release\n", key);
       demo->keys[key] = false;
       break;
   }
@@ -128,10 +126,6 @@ static void handle_glfw_framebuffer_size(GLFWwindow *window, int width, int heig
   if (!demo) return;
 
   update_window_size(demo, width, height);
-  // demo->config.width = width;
-  // demo->config.height = height;
-
-  // wgpuSurfaceConfigure(demo->surface, &demo->config);
 }
 
 static void handle_glfw_cursor_pos(GLFWwindow *window, double xpos, double ypos) {
@@ -143,8 +137,6 @@ static void handle_glfw_cursor_pos(GLFWwindow *window, double xpos, double ypos)
     glm_vec2_copy(current, demo->last_mouse);
     return;
   };
-
-  // printf(LOG_PREFIX " cursor x=%.1f y=%.1f\n", xpos, ypos);
 
   vec2 delta;
   glm_vec2_sub(current, demo->last_mouse, delta);
@@ -216,19 +208,7 @@ void update_player_position(struct demo *demo, float dt) {
     glm_vec3_scale(demo->up, speed, delta);
     glm_vec3_sub(desired_velocity, delta, desired_velocity);
   }
-  // printf(LOG_PREFIX " velocity x=%.1f y=%.1f z=%.1f\n", desired_velocity[0], desired_velocity[1], desired_velocity[2]);
-  // bool moving_vertical = false;
-  // if (keys_.count(GLFW_KEY_SPACE) > 0) {
-  //   desired_velocity += player_speed_ * up_;
-  //   moving_vertical = true;
-  // }
-  // if (keys_.count(GLFW_KEY_LEFT_SHIFT) > 0) {
-  //   desired_velocity -= player_speed_ * up_;
-  //   moving_vertical = true;
-  // }
-  // if (play_mode_ == PlayMode::kFly || moving_vertical) {
   glm_vec3_mix(demo->velocity, desired_velocity, 0.8f, demo->velocity);
-  // } else {
   //   // If there's gravity, we want to keep the up_ component of the velocity but
   //   // slow down the forward_ component
   //   glm::vec3 up_component = glm::dot(player_gaussian_.velocity, up_) * up_;
@@ -236,22 +216,11 @@ void update_player_position(struct demo *demo, float dt) {
   //       glm::dot(player_gaussian_.velocity, forward_) * forward_;
   //   player_gaussian_.velocity =
   //       up_component + 0.8f * desired_velocity + 0.2f * forward_component;
-  // }
 
   // Update position
   vec3 delta_position;
   glm_vec3_scale(demo->velocity, dt, delta_position);
   glm_vec3_add(demo->position, delta_position, demo->position);
-  // demo->position += player_gaussian_.velocity * dt;
-  // std::cout << "Player position: " << player_gaussian_.position.x << " "
-  //           << player_gaussian_.position.y << " " << player_gaussian_.position.z
-  //           << " " << std::endl;
-
-  // // Update up_ vector
-  // up_ = glm::normalize(player_gaussian_.position);
-  // right_ = glm::normalize(glm::cross(forward_, up_));
-  // forward_ = glm::normalize(glm::cross(up_, right_));
-  // look_ = glm::normalize(glm::rotate(forward_, elevation_, right_));
 
   // // Gravity
   // if (play_mode_ == PlayMode::kNormal) {
@@ -469,9 +438,6 @@ int main(int argc, char *argv[]) {
   for (int x = 0; x < 16; x += 1) {
     for (int z = 0; z < 16; z += 1) {
       for (int y = 0; y < 16; y += 1) {
-        // section.data[x + y * 16 + z * 16 * 16] = y < 8 ? 1 : 0;
-        // section.data[x + y * 16 + z * 16 * 16] = (y / 8) ? 1 : 0;
-        // section.data[x + y * 16 + z * 16 * 16] = (x + y + z) % 10 == 0 ? 1 : 0;
         section.data[x + y * 16 + z * 16 * 16] = (z / 2 + x / 2) % 2;
       }
     }
@@ -707,7 +673,6 @@ int main(int argc, char *argv[]) {
     wgpuRenderPassEncoderSetIndexBuffer(render_pass_encoder, index_buffer, WGPUIndexFormat_Uint32, 0, WGPU_WHOLE_SIZE);
     wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, bg, 0, NULL);
     wgpuRenderPassEncoderSetPipeline(render_pass_encoder, render_pipeline);
-    // wgpuRenderPassEncoderDraw(render_pass_encoder, 3, 1, 0, 0);
     wgpuRenderPassEncoderDrawIndexed(render_pass_encoder, section.num_quads * 6, 1, 0, 0, 0);
     wgpuRenderPassEncoderEnd(render_pass_encoder);
 
