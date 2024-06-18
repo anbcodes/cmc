@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "cglm/include/cglm/cglm.h"
+#include "chunk.h"
 #include "framework.h"
 #include "wgpu/webgpu.h"
 #include "wgpu/wgpu.h"
@@ -30,6 +31,8 @@ struct demo {
   WGPUAdapter adapter;
   WGPUDevice device;
   WGPUSurfaceConfiguration config;
+  WGPUTextureDescriptor depth_texture_descriptor;
+  WGPUTexture depth_texture;
   bool keys[GLFW_KEY_LAST + 1];
   bool mouse_captured;
   vec2 last_mouse;
@@ -83,7 +86,7 @@ static void handle_glfw_key(
 
   switch (action) {
     case GLFW_PRESS:
-      printf(LOG_PREFIX " key=%d press\n", key);
+      // printf(LOG_PREFIX " key=%d press\n", key);
       demo->keys[key] = true;
       switch (key) {
         case GLFW_KEY_ESCAPE:
@@ -98,11 +101,24 @@ static void handle_glfw_key(
       }
       break;
     case GLFW_RELEASE:
-      printf(LOG_PREFIX " key=%d release\n", key);
+      // printf(LOG_PREFIX " key=%d release\n", key);
       demo->keys[key] = false;
       break;
   }
 }
+
+void update_window_size(struct demo *demo, int width, int height) {
+  if (demo->depth_texture != NULL) {
+    wgpuTextureRelease(demo->depth_texture);
+  }
+  demo->config.width = width;
+  demo->config.height = height;
+  wgpuSurfaceConfigure(demo->surface, &demo->config);
+  demo->depth_texture_descriptor.size.width = demo->config.width;
+  demo->depth_texture_descriptor.size.height = demo->config.height;
+  demo->depth_texture = wgpuDeviceCreateTexture(demo->device, &demo->depth_texture_descriptor);
+}
+
 static void handle_glfw_framebuffer_size(GLFWwindow *window, int width, int height) {
   if (width == 0 && height == 0) {
     return;
@@ -111,10 +127,11 @@ static void handle_glfw_framebuffer_size(GLFWwindow *window, int width, int heig
   struct demo *demo = glfwGetWindowUserPointer(window);
   if (!demo) return;
 
-  demo->config.width = width;
-  demo->config.height = height;
+  update_window_size(demo, width, height);
+  // demo->config.width = width;
+  // demo->config.height = height;
 
-  wgpuSurfaceConfigure(demo->surface, &demo->config);
+  // wgpuSurfaceConfigure(demo->surface, &demo->config);
 }
 
 static void handle_glfw_cursor_pos(GLFWwindow *window, double xpos, double ypos) {
@@ -127,7 +144,7 @@ static void handle_glfw_cursor_pos(GLFWwindow *window, double xpos, double ypos)
     return;
   };
 
-  printf(LOG_PREFIX " cursor x=%.1f y=%.1f\n", xpos, ypos);
+  // printf(LOG_PREFIX " cursor x=%.1f y=%.1f\n", xpos, ypos);
 
   vec2 delta;
   glm_vec2_sub(current, demo->last_mouse, delta);
@@ -189,7 +206,17 @@ void update_player_position(struct demo *demo, float dt) {
     glm_vec3_scale(demo->forward, speed, delta);
     glm_vec3_sub(desired_velocity, delta, desired_velocity);
   }
-  printf(LOG_PREFIX " velocity x=%.1f y=%.1f z=%.1f\n", desired_velocity[0], desired_velocity[1], desired_velocity[2]);
+  if (demo->keys[GLFW_KEY_SPACE]) {
+    vec3 delta;
+    glm_vec3_scale(demo->up, speed, delta);
+    glm_vec3_add(desired_velocity, delta, desired_velocity);
+  }
+  if (demo->keys[GLFW_KEY_LEFT_SHIFT]) {
+    vec3 delta;
+    glm_vec3_scale(demo->up, speed, delta);
+    glm_vec3_sub(desired_velocity, delta, desired_velocity);
+  }
+  // printf(LOG_PREFIX " velocity x=%.1f y=%.1f z=%.1f\n", desired_velocity[0], desired_velocity[1], desired_velocity[2]);
   // bool moving_vertical = false;
   // if (keys_.count(GLFW_KEY_SPACE) > 0) {
   //   desired_velocity += player_speed_ * up_;
@@ -432,39 +459,48 @@ int main(int argc, char *argv[]) {
     },
   };
 
-  // Define your vertices
-  float vertices[] = {
-    // x, y, z, r, g, b, a
-    -0.5f,
-    -0.5f,
-    0.0f,
-    1.0f,
-    0.0f,
-    0.0f,
-    1.0f,
-    0.5f,
-    -0.5f,
-    0.0f,
-    0.0f,
-    1.0f,
-    0.0f,
-    1.0f,
-    0.0f,
-    0.5f,
-    0.0f,
-    0.0f,
-    0.0f,
-    1.0f,
-    1.0f,
+  ChunkSection section = {
+    .x = 0,
+    .z = 0,
+    .y = 0,
+    .data = {0},
   };
 
-  WGPUBuffer vertex_buffer = frmwrk_device_create_buffer_init(
+  for (int x = 0; x < 16; x += 1) {
+    for (int z = 0; z < 16; z += 1) {
+      for (int y = 0; y < 16; y += 1) {
+        // section.data[x + y * 16 + z * 16 * 16] = y < 8 ? 1 : 0;
+        // section.data[x + y * 16 + z * 16 * 16] = (y / 8) ? 1 : 0;
+        // section.data[x + y * 16 + z * 16 * 16] = (x + y + z) % 10 == 0 ? 1 : 0;
+        section.data[x + y * 16 + z * 16 * 16] = (z / 2 + x / 2) % 2;
+      }
+    }
+  }
+
+  ChunkSection *neighbors[3] = {NULL, NULL, NULL};
+  chunk_section_buffer_update_mesh(&section, neighbors, demo.device);
+
+  int max_quads = 16 * 16 * 16 * 3;
+  uint32_t indices[max_quads * 6];
+  for (int i = 0; i < max_quads; i += 1) {
+    int offset = i * 6;
+    int base = i * 4;
+    indices[offset + 0] = base + 0;
+    indices[offset + 1] = base + 1;
+    indices[offset + 2] = base + 2;
+    indices[offset + 3] = base + 2;
+    indices[offset + 4] = base + 3;
+    indices[offset + 5] = base + 0;
+  }
+  int index_count = sizeof(indices) / sizeof(indices[0]);
+
+  WGPUBuffer index_buffer = frmwrk_device_create_buffer_init(
     demo.device,
     &(const frmwrk_buffer_init_descriptor){
-      .label = "Vertex Buffer",
-      .content = (void *)vertices,
-      .content_size = sizeof(vertices),
-      .usage = WGPUBufferUsage_Vertex,
+      .label = "index_buffer",
+      .content = (void *)indices,
+      .content_size = sizeof(indices),
+      .usage = WGPUBufferUsage_Index,
     }
   );
 
@@ -520,6 +556,18 @@ int main(int argc, char *argv[]) {
         .count = 1,
         .mask = 0xFFFFFFFF,
       },
+      .depthStencil = &(WGPUDepthStencilState){.depthWriteEnabled = true, .depthCompare = WGPUCompareFunction_Less, .format = WGPUTextureFormat_Depth24Plus, .stencilBack = (WGPUStencilFaceState){
+                                                                                                                                                               .compare = WGPUCompareFunction_Always,
+                                                                                                                                                               .failOp = WGPUStencilOperation_Replace,
+                                                                                                                                                               .depthFailOp = WGPUStencilOperation_Replace,
+                                                                                                                                                               .passOp = WGPUStencilOperation_Replace,
+                                                                                                                                                             },
+                                               .stencilFront = (WGPUStencilFaceState){
+                                                 .compare = WGPUCompareFunction_Always,
+                                                 .failOp = WGPUStencilOperation_Replace,
+                                                 .depthFailOp = WGPUStencilOperation_Replace,
+                                                 .passOp = WGPUStencilOperation_Replace,
+                                               }},
     }
   );
   assert(render_pipeline);
@@ -532,14 +580,20 @@ int main(int argc, char *argv[]) {
     .alphaMode = surface_capabilities.alphaModes[0],
   };
 
-  {
-    int width, height;
-    glfwGetWindowSize(window, &width, &height);
-    demo.config.width = width;
-    demo.config.height = height;
-  }
+  demo.depth_texture_descriptor = (WGPUTextureDescriptor){
+    .usage = WGPUTextureUsage_RenderAttachment,
+    .dimension = WGPUTextureDimension_2D,
+    .size = {
+      .depthOrArrayLayers = 1,
+    },
+    .format = WGPUTextureFormat_Depth24Plus,
+    .mipLevelCount = 1,
+    .sampleCount = 1,
+  };
 
-  wgpuSurfaceConfigure(demo.surface, &demo.config);
+  int width, height;
+  glfwGetWindowSize(window, &width, &height);
+  update_window_size(&demo, width, height);
 
   double lastTime = glfwGetTime();
   double targetDeltaTime = 1.0 / 60.0;
@@ -551,7 +605,6 @@ int main(int argc, char *argv[]) {
       continue;
     }
     lastTime = currentTime;
-    printf(LOG_PREFIX " delta_time=%.6f\n", deltaTime);
 
     glfwPollEvents();
     update_player_position(&demo, (float)deltaTime);
@@ -588,9 +641,7 @@ int main(int argc, char *argv[]) {
         int width, height;
         glfwGetWindowSize(window, &width, &height);
         if (width != 0 && height != 0) {
-          demo.config.width = width;
-          demo.config.height = height;
-          wgpuSurfaceConfigure(demo.surface, &demo.config);
+          update_window_size(&demo, width, height);
         }
         continue;
       }
@@ -603,9 +654,11 @@ int main(int argc, char *argv[]) {
     }
     assert(surface_texture.texture);
 
-    WGPUTextureView frame =
-      wgpuTextureCreateView(surface_texture.texture, NULL);
+    WGPUTextureView frame = wgpuTextureCreateView(surface_texture.texture, NULL);
     assert(frame);
+
+    WGPUTextureView depth_frame = wgpuTextureCreateView(demo.depth_texture, NULL);
+    assert(depth_frame);
 
     WGPUCommandEncoder command_encoder = wgpuDeviceCreateCommandEncoder(
       demo.device,
@@ -635,14 +688,22 @@ int main(int argc, char *argv[]) {
               },
             },
           },
+          .depthStencilAttachment = &(WGPURenderPassDepthStencilAttachment){
+            .view = depth_frame,
+            .depthClearValue = 1.0f,
+            .depthLoadOp = WGPULoadOp_Clear,
+            .depthStoreOp = WGPUStoreOp_Store,
+          },
         }
       );
     assert(render_pass_encoder);
 
-    wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, vertex_buffer, 0, WGPU_WHOLE_SIZE);
+    wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, section.vertex_buffer, 0, WGPU_WHOLE_SIZE);
+    wgpuRenderPassEncoderSetIndexBuffer(render_pass_encoder, index_buffer, WGPUIndexFormat_Uint32, 0, WGPU_WHOLE_SIZE);
     wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, bg, 0, NULL);
     wgpuRenderPassEncoderSetPipeline(render_pass_encoder, render_pipeline);
-    wgpuRenderPassEncoderDraw(render_pass_encoder, 3, 1, 0, 0);
+    // wgpuRenderPassEncoderDraw(render_pass_encoder, 3, 1, 0, 0);
+    wgpuRenderPassEncoderDrawIndexed(render_pass_encoder, section.num_quads * 6, 1, 0, 0, 0);
     wgpuRenderPassEncoderEnd(render_pass_encoder);
 
     WGPUCommandBuffer command_buffer = wgpuCommandEncoderFinish(
@@ -671,7 +732,7 @@ int main(int argc, char *argv[]) {
   wgpuDeviceRelease(demo.device);
   wgpuAdapterRelease(demo.adapter);
   wgpuSurfaceRelease(demo.surface);
-  wgpuBufferRelease(vertex_buffer);
+  wgpuBufferRelease(section.vertex_buffer);
   wgpuBufferRelease(uniform_buffer);
   glfwDestroyWindow(window);
   wgpuInstanceRelease(demo.instance);
