@@ -1,5 +1,7 @@
 #include "wgpu/webgpu.h"
 
+#define FLOATS_PER_VERTEX 10
+
 typedef struct ChunkSection {
   int x;
   int z;

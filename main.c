@@ -7,6 +7,7 @@
 #include "cglm/include/cglm/cglm.h"
 #include "chunk.h"
 #include "framework.h"
+#include "lodepng/lodepng.h"
 #include "wgpu/webgpu.h"
 #include "wgpu/wgpu.h"
 
@@ -50,6 +51,21 @@ struct uniforms {
   mat4 view;
   mat4 projection;
 };
+
+unsigned char *load_image(const char *filename, unsigned *width, unsigned *height) {
+  unsigned char *png = 0;
+  size_t pngsize, error;
+  error = lodepng_load_file(&png, &pngsize, filename);
+  if (!error) {
+    unsigned char *image = 0;
+    error = lodepng_decode24(&image, width, height, png, pngsize);
+    free(png);
+    if (!error) {
+      return image;
+    }
+  }
+  return NULL;
+}
 
 static void handle_request_adapter(
   WGPURequestAdapterStatus status,
@@ -423,8 +439,18 @@ int main(int argc, char *argv[]) {
     },
     {
       .format = WGPUVertexFormat_Float32x4,
-      .offset = 0 + 12,  // 0 + sizeof(Float32x3)
+      .offset = 0 + 12,
       .shaderLocation = 1,
+    },
+    {
+      .format = WGPUVertexFormat_Float32x2,
+      .offset = 12 + 16,
+      .shaderLocation = 2,
+    },
+    {
+      .format = WGPUVertexFormat_Float32,
+      .offset = 16 + 8,
+      .shaderLocation = 3,
     },
   };
 
@@ -438,7 +464,7 @@ int main(int argc, char *argv[]) {
   for (int x = 0; x < 16; x += 1) {
     for (int z = 0; z < 16; z += 1) {
       for (int y = 0; y < 16; y += 1) {
-        section.data[x + y * 16 + z * 16 * 16] = (z / 2 + x / 2) % 2;
+        section.data[x + y * 16 + z * 16 * 16] = (z / 2 + x / 2) % 3;
       }
     }
   }
@@ -496,7 +522,7 @@ int main(int argc, char *argv[]) {
         .bufferCount = 1,
         .buffers = (const WGPUVertexBufferLayout[]){
           (const WGPUVertexBufferLayout){
-            .arrayStride = 3 * 4 + 4 * 4,
+            .arrayStride = FLOATS_PER_VERTEX * sizeof(float),
             .stepMode = WGPUVertexStepMode_Vertex,
             .attributeCount = sizeof(vertex_attributes) /
                               sizeof(vertex_attributes[0]),

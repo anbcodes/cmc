@@ -3,8 +3,8 @@
 #include "chunk.h"
 #include "framework.h"
 
-// Max quads per chunk section times 4 vertices per quad times 7 floats per vertex
-static float quads[(16 * 16 * 16 * 3) * 4 * 7];
+// Max quads per chunk section times 4 vertices per quad times floats per vertex
+static float quads[(16 * 16 * 16 * 3) * 4 * FLOATS_PER_VERTEX];
 
 int face_material_between(int a, int b) {
   if (a == 0 && b == 0) {
@@ -98,7 +98,7 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
           du[u] = w;
           int dv[3] = {0};
           dv[v] = h;
-          int q = section->num_quads * 4 * 7;
+          int q = section->num_quads * 4 * FLOATS_PER_VERTEX;
           quads[q + 0] = x[0];
           quads[q + 1] = x[1];
           quads[q + 2] = x[2];
@@ -106,7 +106,10 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
           quads[q + 4] = 0.0f;
           quads[q + 5] = 0.0f;
           quads[q + 6] = 1.0f;
-          q += 7;
+          quads[q + 7] = w;
+          quads[q + 8] = h;
+          quads[q + 9] = m;
+          q += FLOATS_PER_VERTEX;
           quads[q + 0] = x[0] + du[0];
           quads[q + 1] = x[1] + du[1];
           quads[q + 2] = x[2] + du[2];
@@ -114,7 +117,10 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
           quads[q + 4] = 1.0f;
           quads[q + 5] = 0.0f;
           quads[q + 6] = 1.0f;
-          q += 7;
+          quads[q + 7] = 0.0f;
+          quads[q + 8] = h;
+          quads[q + 9] = m;
+          q += FLOATS_PER_VERTEX;
           quads[q + 0] = x[0] + du[0] + dv[0];
           quads[q + 1] = x[1] + du[1] + dv[1];
           quads[q + 2] = x[2] + du[2] + dv[2];
@@ -122,7 +128,10 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
           quads[q + 4] = 1.0f;
           quads[q + 5] = 1.0f;
           quads[q + 6] = 1.0f;
-          q += 7;
+          quads[q + 7] = 0.0f;
+          quads[q + 8] = 0.0f;
+          quads[q + 9] = m;
+          q += FLOATS_PER_VERTEX;
           quads[q + 0] = x[0] + dv[0];
           quads[q + 1] = x[1] + dv[1];
           quads[q + 2] = x[2] + dv[2];
@@ -130,6 +139,9 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
           quads[q + 4] = 0.0f;
           quads[q + 5] = 1.0f;
           quads[q + 6] = 1.0f;
+          quads[q + 7] = w;
+          quads[q + 8] = 0.0f;
+          quads[q + 9] = m;
           section->num_quads += 1;
 
           // Zero out mask
@@ -143,12 +155,16 @@ void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neigh
     }
   }
 
+  if (section->vertex_buffer != NULL) {
+    wgpuBufferRelease(section->vertex_buffer);
+  }
+
   section->vertex_buffer = frmwrk_device_create_buffer_init(
     device,
     &(const frmwrk_buffer_init_descriptor){
       .label = "Vertex Buffer",
       .content = (void *)quads,
-      .content_size = section->num_quads * 4 * 7 * sizeof(float),
+      .content_size = section->num_quads * 4 * FLOATS_PER_VERTEX * sizeof(float),
       .usage = WGPUBufferUsage_Vertex,
     }
   );
