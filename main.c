@@ -176,26 +176,31 @@ static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int act
   Game *game = glfwGetWindowUserPointer(window);
   if (!game) return;
 
-  if (button == GLFW_MOUSE_BUTTON_LEFT) {
-    switch (action) {
-      case GLFW_PRESS:
-        if (!game->mouse_captured) {
-          glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-          game->mouse_captured = true;
-          break;
-        }
-        float reach = 5.0f;
-        vec3 target;
-        vec3 normal;
-        int material;
-        world_target_block(&game->world, game->position, game->look, reach, target, normal, &material);
-        printf("target %.2f %.2f %.2f\n", target[0], target[1], target[2]);
-        printf("material %d\n", material);
-        if (material != 0) {
-          world_set_block(&game->world, target, 0, game->device);
-        }
+  switch (action) {
+    case GLFW_PRESS:
+      if (!game->mouse_captured) {
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        game->mouse_captured = true;
         break;
-    }
+      }
+      float reach = 5.0f;
+      vec3 target;
+      vec3 normal;
+      int material;
+      world_target_block(&game->world, game->position, game->look, reach, target, normal, &material);
+      if (material != 0) {
+        switch (button) {
+          case GLFW_MOUSE_BUTTON_LEFT:
+            world_set_block(&game->world, target, 0, game->device);
+            break;
+          case GLFW_MOUSE_BUTTON_RIGHT:
+            vec3 air_position;
+            glm_vec3_add(target, normal, air_position);
+            world_set_block(&game->world, air_position, 1, game->device);
+            break;
+        }
+      }
+      break;
   }
 }
 
@@ -404,8 +409,7 @@ int main(int argc, char *argv[]) {
   unsigned int texture_width;
   unsigned int texture_height;
   unsigned char *image_data = load_image("texture-2.png", &texture_width, &texture_height);
-  printf("texture_width=%u texture_height=%u\n", texture_width, texture_height);
-  // Create the texture.
+
   WGPUTextureDescriptor texture_descriptor = {
     .usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding,
     .dimension = WGPUTextureDimension_2D,
@@ -432,15 +436,18 @@ int main(int argc, char *argv[]) {
   };
   WGPUTextureView texture_view = wgpuTextureCreateView(texture, &textureViewDescriptor);
 
-  WGPUSampler texture_sampler = wgpuDeviceCreateSampler(game.device, &(WGPUSamplerDescriptor){
-                                                                       .addressModeU = WGPUAddressMode_Repeat,
-                                                                       .addressModeV = WGPUAddressMode_Repeat,
-                                                                       .addressModeW = WGPUAddressMode_Repeat,
-                                                                       .magFilter = WGPUFilterMode_Nearest,
-                                                                       .minFilter = WGPUFilterMode_Nearest,
-                                                                       .mipmapFilter = WGPUFilterMode_Nearest,
-                                                                       .maxAnisotropy = 1,
-                                                                     });
+  WGPUSampler texture_sampler = wgpuDeviceCreateSampler(
+    game.device,
+    &(WGPUSamplerDescriptor){
+      .addressModeU = WGPUAddressMode_Repeat,
+      .addressModeV = WGPUAddressMode_Repeat,
+      .addressModeW = WGPUAddressMode_Repeat,
+      .magFilter = WGPUFilterMode_Nearest,
+      .minFilter = WGPUFilterMode_Nearest,
+      .mipmapFilter = WGPUFilterMode_Nearest,
+      .maxAnisotropy = 1,
+    }
+  );
 
   WGPUBuffer buffer = frmwrk_device_create_buffer_init(
     game.device,
