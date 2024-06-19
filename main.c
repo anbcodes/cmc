@@ -189,6 +189,11 @@ static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int act
         vec3 normal;
         int material;
         world_target_block(&game->world, game->position, game->look, reach, target, normal, &material);
+        printf("target %.2f %.2f %.2f\n", target[0], target[1], target[2]);
+        printf("material %d\n", material);
+        if (material != 0) {
+          world_set_block(&game->world, target, 0, game->device);
+        }
         break;
     }
   }
@@ -629,7 +634,7 @@ int main(int argc, char *argv[]) {
       if (s > 0) {
         neighbors[1] = &chunk->sections[s - 1];
       }
-      chunk_section_buffer_update_mesh(&chunk->sections[s], neighbors, game.device);
+      chunk_section_update_mesh(&chunk->sections[s], neighbors, game.device);
     }
   }
 

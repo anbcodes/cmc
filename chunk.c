@@ -5,6 +5,14 @@
 
 #include "framework.h"
 
+int positive_mod(int a, int b) {
+  int result = a % b;
+  if (result < 0) {
+    result += b;
+  }
+  return result;
+}
+
 // Max quads per chunk section times 4 vertices per quad times floats per vertex
 static float quads[(CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * 3) * 4 * FLOATS_PER_VERTEX];
 
@@ -19,6 +27,42 @@ Chunk *world_chunk(World *world, int x, int z) {
     }
   }
   return NULL;
+}
+
+void world_set_block(World *world, vec3 position, int material, WGPUDevice device) {
+  int chunk_x = (int)floor(position[0] / CHUNK_SIZE);
+  int chunk_z = (int)floor(position[2] / CHUNK_SIZE);
+  Chunk *chunk = world_chunk(world, chunk_x, chunk_z);
+  if (chunk == NULL) {
+    return;
+  }
+  vec3 chunk_position;
+  glm_vec3_sub(position, (vec3){chunk->x * CHUNK_SIZE, 0.0f, chunk->z * CHUNK_SIZE}, chunk_position);
+  int x = (int)floor(chunk_position[0]);
+  int y = positive_mod((int)floor(chunk_position[1]), 16);
+  int z = (int)floor(chunk_position[2]);
+  int s = (int)floor(chunk_position[1] / 16) + 4;
+  chunk->sections[s].data[x + 16 * (y + 16 * z)] = material;
+
+  // Update mesh
+  chunk_section_update_mesh_if_internal(&chunk->sections[s], world, device);
+
+  // Update neighbors if at upper edge
+  if (x == CHUNK_SIZE - 1) {
+    Chunk *chunk_x = world_chunk(world, chunk->x + 1, chunk->z);
+    if (chunk_x) {
+      chunk_section_update_mesh_if_internal(&chunk_x->sections[s], world, device);
+    }
+  }
+  if (y == CHUNK_SIZE - 1 && s < Y_SECTIONS - 1) {
+    chunk_section_update_mesh_if_internal(&chunk->sections[s + 1], world, device);
+  }
+  if (z == CHUNK_SIZE - 1) {
+    Chunk *chunk_z = world_chunk(world, chunk->x, chunk->z + 1);
+    if (chunk_z) {
+      chunk_section_update_mesh_if_internal(&chunk_z->sections[s], world, device);
+    }
+  }
 }
 
 void world_target_block(World *world, vec3 position, vec3 look, float reach, vec3 target, vec3 normal, int *material) {
@@ -47,7 +91,7 @@ void world_target_block(World *world, vec3 position, vec3 look, float reach, vec
     vec3 chunk_location;
     glm_vec3_sub(location, (vec3){chunk->x * CHUNK_SIZE, 0.0f, chunk->z * CHUNK_SIZE}, chunk_location);
     int x = (int)floor(chunk_location[0]);
-    int y = (int)floor(chunk_location[1]) % 16;
+    int y = positive_mod((int)floor(chunk_location[1]), 16);
     int z = (int)floor(chunk_location[2]);
     int section = (int)floor(chunk_location[1] / 16) + 4;
     uint16_t mat = chunk->sections[section].data[x + 16 * (y + 16 * z)];
@@ -77,6 +121,7 @@ void world_target_block(World *world, vec3 position, vec3 look, float reach, vec
     distance += 0.01f;
     glm_vec3_add(location, delta, location);
   }
+  *material = 0;
 }
 
 int face_material_between(int a, int b) {
@@ -106,7 +151,22 @@ int face_material_between(int a, int b) {
   return a;
 }
 
-void chunk_section_buffer_update_mesh(ChunkSection *section, ChunkSection *neighbors[3], WGPUDevice device) {
+void chunk_section_update_mesh_if_internal(ChunkSection *section, World *world, WGPUDevice device) {
+  Chunk *chunk = world_chunk(world, section->x, section->z);
+  Chunk *x_chunk = world_chunk(world, section->x - 1, section->z);
+  Chunk *z_chunk = world_chunk(world, section->x, section->z - 1);
+  if (chunk == NULL || x_chunk == NULL || z_chunk == NULL) {
+    return;
+  }
+  int s = section->y + 4;
+  ChunkSection *neighbors[3] = {&x_chunk->sections[s], NULL, &z_chunk->sections[s]};
+  if (s > 0) {
+    neighbors[1] = &chunk->sections[s - 1];
+  }
+  chunk_section_update_mesh(&chunk->sections[s], neighbors, device);
+}
+
+void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3], WGPUDevice device) {
   section->num_quads = 0;
   int mask[16 * 16];
   vec3 base = {section->x * CHUNK_SIZE, section->y * CHUNK_SIZE, section->z * CHUNK_SIZE};
