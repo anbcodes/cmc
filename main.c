@@ -23,6 +23,8 @@
 
 #define LOG_PREFIX "[triangle]"
 
+
+const float COLLISION_EPSILON = 0.001f;
 const float TURN_SPEED = 0.002f;
 const float TICKS_PER_SECOND = 60.0f;
 
@@ -34,11 +36,14 @@ typedef struct Game {
   WGPUSurfaceConfiguration config;
   WGPUTextureDescriptor depth_texture_descriptor;
   WGPUTexture depth_texture;
+  float eye_height;
+  vec3 size;
   bool keys[GLFW_KEY_LAST + 1];
   bool mouse_captured;
   vec2 last_mouse;
   float elevation;
   float movement_speed;
+  bool on_ground;
   vec3 position;
   vec3 velocity;
   vec3 up;
@@ -187,7 +192,8 @@ static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int act
       vec3 target;
       vec3 normal;
       int material;
-      world_target_block(&game->world, game->position, game->look, reach, target, normal, &material);
+      vec3 eye = {game->position[0], game->position[1] + game->eye_height, game->position[2]};
+      world_target_block(&game->world, eye, game->look, reach, target, normal, &material);
       if (material != 0) {
         switch (button) {
           case GLFW_MOUSE_BUTTON_LEFT:
@@ -208,6 +214,115 @@ static void handle_glfw_set_scroll(GLFWwindow *window, double xoffset, double yo
   UNUSED(window)
   UNUSED(xoffset)
   UNUSED(yoffset)
+}
+
+void game_update_player_y(Game *game, float delta) {
+  vec3 p;
+  glm_vec3_copy(game->position, p);
+  float new_y = p[1] + delta;
+  vec3 sz = {game->size[0] / 2, game->size[1], game->size[2] / 2};
+  World *w = &game->world;
+
+  // Move +y
+  if (delta > 0 && floor(new_y + sz[1]) > floor(p[1] + sz[1])) {
+    for (int dx = -1; dx <= 1; dx += 2) {
+      for (int dz = -1; dz <= 1; dz += 2) {
+        int m = world_get_material(w, (vec3){p[0] + dx * sz[0], new_y + sz[1], p[2] + dz * sz[2]});
+        if (m != 0) {
+          game->position[1] = floor(new_y + sz[1]) - sz[1] - COLLISION_EPSILON;
+          game->velocity[1] = 0;
+          return;
+        }
+      }
+    }
+  }
+  // Move -y
+  if (delta < 0 && floor(new_y) < floor(p[1])) {
+    for (int dx = -1; dx <= 1; dx += 2) {
+      for (int dz = -1; dz <= 1; dz += 2) {
+        int m = world_get_material(w, (vec3){p[0] + dx * sz[0], new_y, p[2] + dz * sz[2]});
+        if (m != 0) {
+          game->position[1] = ceil(new_y) + COLLISION_EPSILON;
+          game->velocity[1] = 0;
+          game->on_ground = true;
+          return;
+        }
+      }
+    }
+  }
+  game->position[1] = new_y;
+}
+
+void game_update_player_x(Game *game, float delta) {
+  vec3 p;
+  glm_vec3_copy(game->position, p);
+  float new_x = p[0] + delta;
+  vec3 sz = {game->size[0] / 2, game->size[1], game->size[2] / 2};
+  World *w = &game->world;
+
+  // Move +x
+  if (delta > 0 && floor(new_x + sz[0]) > floor(p[0] + sz[0])) {
+    for (int dz = -1; dz <= 1; dz += 2) {
+      for (int dy = 0; dy < sz[1]; dy += 1) {
+        int m = world_get_material(w, (vec3){new_x + sz[0], p[1] + dy, p[2] + dz * sz[2]});
+        if (m != 0) {
+          game->position[0] = floor(new_x + sz[0]) - sz[0] - COLLISION_EPSILON;
+          game->velocity[0] = 0;
+          return;
+        }
+      }
+    }
+  }
+  // Move -x
+  if (delta < 0 && floor(new_x - sz[0]) < floor(p[0] - sz[0])) {
+    for (int dz = -1; dz <= 1; dz += 2) {
+      for (int dy = 0; dy < sz[1]; dy += 1) {
+        int m = world_get_material(w, (vec3){new_x - sz[0], p[1] + dy, p[2] + dz * sz[2]});
+        if (m != 0) {
+          game->position[0] = ceil(new_x - sz[0]) + sz[0] + COLLISION_EPSILON;
+          game->velocity[0] = 0;
+          return;
+        }
+      }
+    }
+  }
+  game->position[0] = new_x;
+}
+
+void game_update_player_z(Game *game, float delta) {
+  vec3 p;
+  glm_vec3_copy(game->position, p);
+  float new_z = p[2] + delta;
+  vec3 sz = {game->size[0] / 2, game->size[1], game->size[2] / 2};
+  World *w = &game->world;
+
+  // Move +z
+  if (delta > 0 && floor(new_z + sz[2]) > floor(p[2] + sz[2])) {
+    for (int dx = -1; dx <= 1; dx += 2) {
+      for (int dy = 0; dy < sz[1]; dy += 1) {
+        int m = world_get_material(w, (vec3){p[0] + dx * sz[0], p[1] + dy, new_z + sz[2]});
+        if (m != 0) {
+          game->position[2] = floor(new_z + sz[2]) - sz[2] - COLLISION_EPSILON;
+          game->velocity[2] = 0;
+          return;
+        }
+      }
+    }
+  }
+  // Move -z
+  if (delta < 0 && floor(new_z - sz[2]) < floor(p[2] - sz[2])) {
+    for (int dx = -1; dx <= 1; dx += 2) {
+      for (int dy = 0; dy < sz[1]; dy += 1) {
+        int m = world_get_material(w, (vec3){p[0] + dx * sz[0], p[1] + dy, new_z - sz[2]});
+        if (m != 0) {
+          game->position[2] = ceil(new_z - sz[2]) + sz[2] + COLLISION_EPSILON;
+          game->velocity[2] = 0;
+          return;
+        }
+      }
+    }
+  }
+  game->position[2] = new_z;
 }
 
 void update_player_position(Game *game, float dt) {
@@ -243,7 +358,7 @@ void update_player_position(Game *game, float dt) {
     glm_vec3_scale(game->up, speed, delta);
     glm_vec3_sub(desired_velocity, delta, desired_velocity);
   }
-  glm_vec3_mix(game->velocity, desired_velocity, 0.8f, game->velocity);
+  glm_vec3_mix(game->velocity, desired_velocity, 0.2f, game->velocity);
   //   // If there's gravity, we want to keep the up_ component of the velocity but
   //   // slow down the forward_ component
   //   glm::vec3 up_component = glm::dot(player_gaussian_.velocity, up_) * up_;
@@ -253,9 +368,22 @@ void update_player_position(Game *game, float dt) {
   //       up_component + 0.8f * desired_velocity + 0.2f * forward_component;
 
   // Update position
-  vec3 delta_position;
-  glm_vec3_scale(game->velocity, dt, delta_position);
-  glm_vec3_add(game->position, delta_position, game->position);
+  vec3 delta;
+  glm_vec3_scale(game->velocity, dt, delta);
+
+  vec3 p;
+  glm_vec3_copy(game->position, p);
+  vec3 np;
+  glm_vec3_add(game->position, delta, np);
+
+  game_update_player_y(game, delta[1]);
+  if (abs(delta[0]) > abs(delta[2])) {
+    game_update_player_x(game, delta[0]);
+    game_update_player_z(game, delta[2]);
+  } else {
+    game_update_player_z(game, delta[2]);
+    game_update_player_x(game, delta[0]);
+  }
 
   // // Gravity
   // if (play_mode_ == PlayMode::kNormal) {
@@ -274,11 +402,13 @@ int main(int argc, char *argv[]) {
 
   Game game = {
     .movement_speed = 0.1f,
-    .position = {0.0f, 0.0f, -1.0f},
+    .position = {0.0f, 20.0f, 0.0f},
     .up = {0.0f, 1.0f, 0.0f},
     .forward = {0.0f, 0.0f, 1.0f},
-    .right = {1.0f, 0.0f, 0.0f},
+    .right = {-1.0f, 0.0f, 0.0f},
     .look = {0.0f, 0.0f, 1.0f},
+    .eye_height = 1.62,
+    .size = {0.6, 1.8, 0.6},
   };
 
   game.instance = wgpuCreateInstance(NULL);
@@ -779,11 +909,12 @@ int main(int argc, char *argv[]) {
     glfwPollEvents();
     update_player_position(&game, (float)deltaTime);
 
+    vec3 eye = {game.position[0], game.position[1] + game.eye_height, game.position[2]};
     vec3 center;
-    glm_vec3_add(game.position, game.look, center);
+    glm_vec3_add(eye, game.look, center);
 
     mat4 view;
-    glm_lookat(game.position, center, game.up, view);
+    glm_lookat(eye, center, game.up, view);
     memcpy(&uniforms.view, view, sizeof(view));
 
     mat4 projection;

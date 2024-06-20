@@ -32,5 +32,6 @@ void chunk_section_update_mesh_if_internal(ChunkSection *section, World *world, 
 void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3], WGPUDevice device);
 
 Chunk *world_chunk(World *world, int x, int z);
+int world_get_material(World *world, vec3 position);
 void world_set_block(World *world, vec3 position, int material, WGPUDevice device);
 void world_target_block(World *world, vec3 position, vec3 look, float reach, vec3 target, vec3 normal, int *material);

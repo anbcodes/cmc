@@ -29,6 +29,22 @@ Chunk *world_chunk(World *world, int x, int z) {
   return NULL;
 }
 
+int world_get_material(World *world, vec3 position) {
+  int chunk_x = (int)floor(position[0] / CHUNK_SIZE);
+  int chunk_z = (int)floor(position[2] / CHUNK_SIZE);
+  Chunk *chunk = world_chunk(world, chunk_x, chunk_z);
+  if (chunk == NULL) {
+    return 0;
+  }
+  vec3 chunk_position;
+  glm_vec3_sub(position, (vec3){chunk->x * CHUNK_SIZE, 0.0f, chunk->z * CHUNK_SIZE}, chunk_position);
+  int x = (int)floor(chunk_position[0]);
+  int y = positive_mod((int)floor(chunk_position[1]), CHUNK_SIZE);
+  int z = (int)floor(chunk_position[2]);
+  int s = (int)floor(chunk_position[1] / CHUNK_SIZE) + 4;
+  return chunk->sections[s].data[x + CHUNK_SIZE * (y + CHUNK_SIZE * z)];
+}
+
 void world_set_block(World *world, vec3 position, int material, WGPUDevice device) {
   int chunk_x = (int)floor(position[0] / CHUNK_SIZE);
   int chunk_z = (int)floor(position[2] / CHUNK_SIZE);
