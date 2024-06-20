@@ -363,7 +363,7 @@ void mcapi_destroy_buffer(const mcapiBuffer buffer) {
 
 void mcapi_print_buf(mcapiBuffer buf) {
   for (int i = 0; i < buf.len; i++) {
-    printf("%x ", buf.ptr[i]);
+    printf("%02x ", buf.ptr[i]);
   }
 
   printf("\n");
@@ -611,6 +611,20 @@ int64_t read_long(ReadableBuffer *io) {
   return num;
 }
 
+uint64_t read_ulong(ReadableBuffer *io) {
+  uint64_t num = 0;
+
+  num += (uint64_t)read_byte(io) << 8 * 7;
+  num += (uint64_t)read_byte(io) << 8 * 6;
+  num += (uint64_t)read_byte(io) << 8 * 5;
+  num += (uint64_t)read_byte(io) << 8 * 4;
+  num += (uint64_t)read_byte(io) << 8 * 3;
+  num += (uint64_t)read_byte(io) << 8 * 2;
+  num += (uint64_t)read_byte(io) << 8 * 1;
+  num += (uint64_t)read_byte(io);
+  return num;
+}
+
 float read_float(ReadableBuffer *io) {
   int value = read_int(io);
   return *(float*)(&value);
@@ -748,11 +762,36 @@ mcapiUUID read_uuid(ReadableBuffer *io) {
   return uuid;
 }
 
-void read_compressed_long_arr(ReadableBuffer* p, int bits_per_entry, int entries, int to[]) {
+/*
+// Decompress the block array
+int compressed_blocks_len = ntohl(*(uint32_t *)(compressed_blocks));
+uint64_t *compressed = (uint64_t *)(compressed_blocks + 4);
+int bitsize = ceil_log2(palette_length);
+bitsize = bitsize > 4 ? bitsize : 4;
+dprintf("Bitsize %d compressed_len %d\n", bitsize, compressed_blocks_len);
+
+thread_local static uint16_t uncompressed[4096];
+
+int ind = 0;
+for (int i = 0; i < compressed_blocks_len; i++) {
+  uint64_t cur = ntohll(compressed[i]);
+  for (int j = 0; j < 64 / bitsize; j++) {
+    int block = cur & ((1 << bitsize) - 1);
+    cur = cur >> bitsize;
+    uncompressed[ind] = block;
+    ind++;
+    if (ind == 4096) {
+      goto after_loop;
+    }
+  }
+}
+after_loop:
+*/
+
+void read_compressed_long_arr(ReadableBuffer* p, int bits_per_entry, int entries, int compressed_len, int to[]) {
   int ind = 0;
-  for (int i = 0;;i++) {
-    long value = read_long(p);
-    uint64_t cur = ntohll(value);
+  for (int i = 0; i < compressed_len; i++) {
+    uint64_t cur = read_ulong(p);
     // printf("comlong i=%d, bpe=%d, total_entries=%d, curr_entry=%d\n", i, bits_per_entry, entries, ind);
     for (int j = 0; j < 64 / bits_per_entry; j++) {
       int block = cur & ((1 << bits_per_entry) - 1);
@@ -787,8 +826,6 @@ mcapiString read_nbt_string(ReadableBuffer *p) {
   };
 
   res.ptr = p->buf.ptr + p->cursor;
-
-  printf("rns: len=%ld, cursor=%d, slen=%ld\n", p->buf.len, p->cursor, res.len);
 
   p->cursor += res.len;
 
@@ -832,7 +869,6 @@ void read_nbt_value(ReadableBuffer* p, mcapiNBT* nbt, mcapiNBTTagType type) {
     case MCAPI_NBT_LIST:
       mcapiNBTTagType list_type = read_byte(p);
       size = nbt->list_value.size = read_int(p);
-      printf("List tag len=%d\n", size);
       nbt->list_value.items = calloc(nbt->list_value.size, sizeof(mcapiNBT));
       for (int i = 0; i < size; i++) {
         nbt->list_value.items[i].type = list_type;
@@ -843,8 +879,6 @@ void read_nbt_value(ReadableBuffer* p, mcapiNBT* nbt, mcapiNBTTagType type) {
       int curr_buflen = 4;
       nbt->compound_value.children = calloc(curr_buflen, sizeof(mcapiNBT));
       for (int i = 0;;i++) {
-        printf("Compound index %d\n", i);
-        printf("Here 1 cursor=%d len=%ld\n", p->cursor, p->buf.len);
         if (i >= curr_buflen) {
           int old_buflen = curr_buflen;
           curr_buflen *= 2;
@@ -862,7 +896,6 @@ void read_nbt_value(ReadableBuffer* p, mcapiNBT* nbt, mcapiNBTTagType type) {
       break;
     case MCAPI_NBT_INT_ARRAY:
       size = nbt->int_array_value.size = read_int(p);
-      printf("int_array_size %d\n", size);
       nbt->int_array_value.data = malloc(sizeof(int)*size);
       for (int i = 0; i < size; i++) {
         nbt->int_array_value.data[i] = read_int(p);
@@ -870,7 +903,6 @@ void read_nbt_value(ReadableBuffer* p, mcapiNBT* nbt, mcapiNBTTagType type) {
       break;
     case MCAPI_NBT_LONG_ARRAY:
       size = nbt->long_array_value.size = read_int(p);
-      printf("long_array_size %d\n", size);
       nbt->long_array_value.data = malloc(sizeof(int64_t)*size);
       for (int i = 0; i < size; i++) {
         nbt->long_array_value.data[i] = read_long(p);
@@ -881,7 +913,6 @@ void read_nbt_value(ReadableBuffer* p, mcapiNBT* nbt, mcapiNBTTagType type) {
 
 void read_nbt_into(ReadableBuffer* p, mcapiNBT* nbt) {
   mcapiNBTTagType type = read_byte(p);
-  printf("NBT_TYPE %d\n", type);
   nbt->type = type;
 
   if (type == MCAPI_NBT_END) {
@@ -897,7 +928,6 @@ mcapiNBT* read_nbt(ReadableBuffer* p) {
   mcapiNBT* nbt = calloc(1, sizeof(mcapiNBT));
 
   int type = read_byte(p);
-  printf("first type %d\n", type);
 
   read_nbt_value(p, nbt, type);
 
@@ -909,7 +939,7 @@ mcapiNBT* read_nbt(ReadableBuffer* p) {
 void send_packet(mcapiConnection *conn, const mcapiBuffer packet) {
   WritableBuffer header_buffer = create_writable_buffer();
 
-  printf("Sending packet %x (compthresh %d, len %ld)\n", packet.ptr[0], conn->compression_threshold, packet.len);
+  // printf("Sending packet %x (compthresh %d, len %ld)\n", packet.ptr[0], conn->compression_threshold, packet.len);
 
   if (conn->compression_threshold > 0) {
     write_varint(&header_buffer, packet.len + 1);
@@ -1073,14 +1103,10 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
   res.chunk_z = read_int(p);
   printf("Chunk x=%d z=%d\n", res.chunk_x, res.chunk_z);
   res.heightmaps = read_nbt(p);
-  mcapi_print_buf((mcapiBuffer){
-        .len = 40,
-        .ptr = p->buf.ptr + p->cursor,
-      });
   int data_len = read_varint(p);
 
   res.chunk_section_count = 24;
-  res.chunk_sections = malloc(sizeof(mcapiChunkSection) * 24);
+  res.chunk_sections = calloc(24, sizeof(mcapiChunkSection));
   for (int i = 0; i < 24; i++) {
     res.chunk_sections[i].block_count = read_short(p);
     {
@@ -1099,15 +1125,19 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
         }
 
         int compressed_blocks_len = read_varint(p);
-        read_compressed_long_arr(p, bits_per_entry, 4096, res.chunk_sections[i].blocks);
+        printf("compressed_blocks_array=%d bitsize=%d\n", compressed_blocks_len, bits_per_entry);
+        read_compressed_long_arr(p, bits_per_entry, 4096, compressed_blocks_len, res.chunk_sections[i].blocks);
 
         for (int j = 0; j < 4096; j++) {
-          res.chunk_sections[i].blocks[j] = palette[res.chunk_sections[i].blocks[j]];
+          // if (palette[res.chunk_sections[i].blocks[j]] == 0) {
+            res.chunk_sections[i].blocks[j] = palette[res.chunk_sections[i].blocks[j]];
+          // }
         }
+
       } else {
         int compressed_blocks_len = read_varint(p);
 
-        read_compressed_long_arr(p, bits_per_entry, 4096, res.chunk_sections[i].blocks);
+        read_compressed_long_arr(p, bits_per_entry, 4096, compressed_blocks_len, res.chunk_sections[i].blocks);
       }
     }
 
@@ -1126,16 +1156,16 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
           palette[j] = read_varint(p);
         }
 
-        int compressed_blocks_len = read_varint(p);
+        int compressed_biomes_len = read_varint(p);
 
-        read_compressed_long_arr(p, bits_per_entry, 64, res.chunk_sections[i].biomes);
+        read_compressed_long_arr(p, bits_per_entry, 64, compressed_biomes_len, res.chunk_sections[i].biomes);
 
         for (int j = 0; j < 64; j++) {
           res.chunk_sections[i].biomes[j] = palette[res.chunk_sections[i].biomes[j]];
         }
       } else {
         int compressed_biomes_len = read_varint(p);
-        read_compressed_long_arr(p, bits_per_entry, 64, res.chunk_sections[i].biomes);
+        read_compressed_long_arr(p, bits_per_entry, 64, compressed_biomes_len, res.chunk_sections[i].biomes);
       }
     }
   }
@@ -1200,7 +1230,6 @@ void mcapi_poll(mcapiConnection* conn) {
         for (int i = 0; i < nbytes_read; i++) {
           if (has_varint(readable)) {
             int len = read_varint(&readable);
-            printf("Read len %d\n", len);
             curr_packet = to_readable_buffer(mcapi_create_buffer(len));
             break;
           }
@@ -1229,8 +1258,8 @@ void mcapi_poll(mcapiConnection* conn) {
         // Handle packet
 
         int type = read_varint(&curr_packet);
-        printf("Handling packet %x (len %ld)\n", type, curr_packet.buf.len);
-        mcapi_print_buf(curr_packet.buf);
+        // printf("Handling packet %02x (len %ld)\n", type, curr_packet.buf.len);
+        // mcapi_print_buf(curr_packet.buf);
         if (conn->state == MCAPI_STATE_LOGIN) {
           switch(type) {
             case SET_COMPRESSION:
@@ -1243,7 +1272,8 @@ void mcapi_poll(mcapiConnection* conn) {
               destory_login_success_packet(packet);
               break;
             default:
-              printf("Unknown Login Packet %x (len %ld)\n", type, curr_packet.buf.len);
+              printf("Unknown login packet %02x (len %ld)\n", type, curr_packet.buf.len);
+              break;
           }
 /*
 Unknown Play Packet 2b
@@ -1270,7 +1300,8 @@ Unknown Play Packet 6c
               destroy_clientbound_known_packs_packet(packet);
               break;
             default:
-              printf("Unknown Config Packet %x (len %ld)\n", type, curr_packet.buf.len);
+              printf("Unknown config packet %02x (len %ld)\n", type, curr_packet.buf.len);
+              break;
           }
 
         } else if (conn->state == MCAPI_STATE_PLAY) {
@@ -1285,7 +1316,8 @@ Unknown Play Packet 6c
               if (conn->synchronize_player_position_cb) (*conn->synchronize_player_position_cb)(conn, syncPacket);
               break;
             default:
-              printf("Unknown Play Packet %x (len %ld)\n", type, curr_packet.buf.len);
+              // printf("Unknown play packet %02x (len %ld)\n", type, curr_packet.buf.len);
+              break;
           }
         }
 

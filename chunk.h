@@ -13,7 +13,7 @@ typedef struct ChunkSection {
   int x;
   int y;
   int z;
-  uint16_t data[16*16*16];
+  int data[16*16*16];
   WGPUBuffer vertex_buffer;
   int num_quads;
 } ChunkSection;
@@ -32,6 +32,8 @@ void chunk_section_update_mesh_if_internal(ChunkSection *section, World *world, 
 void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3], WGPUDevice device);
 
 Chunk *world_chunk(World *world, int x, int z);
+int world_add_chunk(World *world, Chunk *chunk);
 int world_get_material(World *world, vec3 position);
 void world_set_block(World *world, vec3 position, int material, WGPUDevice device);
 void world_target_block(World *world, vec3 position, vec3 look, float reach, vec3 target, vec3 normal, int *material);
+void world_init_new_meshes(World *world, WGPUDevice device);

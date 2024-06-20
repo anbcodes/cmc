@@ -29,6 +29,18 @@ Chunk *world_chunk(World *world, int x, int z) {
   return NULL;
 }
 
+int world_add_chunk(World *world, Chunk *chunk) {
+  for (int i = 0; i < MAX_CHUNKS; i += 1) {
+    if (world->chunks[i] == NULL) {
+      world->chunks[i] = chunk;
+      return i;
+    }
+  }
+  printf("No space for chunk\n");
+  assert(false);
+  return -1;
+}
+
 int world_get_material(World *world, vec3 position) {
   int chunk_x = (int)floor(position[0] / CHUNK_SIZE);
   int chunk_z = (int)floor(position[2] / CHUNK_SIZE);
@@ -42,7 +54,7 @@ int world_get_material(World *world, vec3 position) {
   int y = positive_mod((int)floor(chunk_position[1]), CHUNK_SIZE);
   int z = (int)floor(chunk_position[2]);
   int s = (int)floor(chunk_position[1] / CHUNK_SIZE) + 4;
-  return chunk->sections[s].data[x + CHUNK_SIZE * (y + CHUNK_SIZE * z)];
+  return chunk->sections[s].data[x + CHUNK_SIZE * (z + CHUNK_SIZE * y)];
 }
 
 void world_set_block(World *world, vec3 position, int material, WGPUDevice device) {
@@ -55,10 +67,10 @@ void world_set_block(World *world, vec3 position, int material, WGPUDevice devic
   vec3 chunk_position;
   glm_vec3_sub(position, (vec3){chunk->x * CHUNK_SIZE, 0.0f, chunk->z * CHUNK_SIZE}, chunk_position);
   int x = (int)floor(chunk_position[0]);
-  int y = positive_mod((int)floor(chunk_position[1]), 16);
+  int y = positive_mod((int)floor(chunk_position[1]), CHUNK_SIZE);
   int z = (int)floor(chunk_position[2]);
-  int s = (int)floor(chunk_position[1] / 16) + 4;
-  chunk->sections[s].data[x + 16 * (y + 16 * z)] = material;
+  int s = (int)floor(chunk_position[1] / CHUNK_SIZE) + 4;
+  chunk->sections[s].data[x + CHUNK_SIZE * (z + CHUNK_SIZE * y)] = material;
 
   // Update mesh
   chunk_section_update_mesh_if_internal(&chunk->sections[s], world, device);
@@ -107,10 +119,10 @@ void world_target_block(World *world, vec3 position, vec3 look, float reach, vec
     vec3 chunk_location;
     glm_vec3_sub(location, (vec3){chunk->x * CHUNK_SIZE, 0.0f, chunk->z * CHUNK_SIZE}, chunk_location);
     int x = (int)floor(chunk_location[0]);
-    int y = positive_mod((int)floor(chunk_location[1]), 16);
+    int y = positive_mod((int)floor(chunk_location[1]), CHUNK_SIZE);
     int z = (int)floor(chunk_location[2]);
-    int section = (int)floor(chunk_location[1] / 16) + 4;
-    uint16_t mat = chunk->sections[section].data[x + 16 * (y + 16 * z)];
+    int section = (int)floor(chunk_location[1] / CHUNK_SIZE) + 4;
+    int mat = chunk->sections[section].data[x + CHUNK_SIZE * (z + CHUNK_SIZE * y)];
     if (mat != 0) {
       glm_vec3_copy(location, target);
       glm_vec3_copy((vec3){0.0f, 0.0f, 0.0f}, normal);
@@ -139,6 +151,33 @@ void world_target_block(World *world, vec3 position, vec3 look, float reach, vec
   }
   *material = 0;
 }
+
+void world_init_new_meshes(World *world, WGPUDevice device) {
+  for (int ci = 0; ci < MAX_CHUNKS; ci += 1) {
+    Chunk *chunk = world->chunks[ci];
+    if (chunk == NULL) {
+      continue;
+    }
+    Chunk *x_chunk = world_chunk(world, chunk->x - 1, chunk->z);
+    Chunk *z_chunk = world_chunk(world, chunk->x, chunk->z - 1);
+    if (x_chunk == NULL || z_chunk == NULL) {
+      continue;
+    }
+    for (int s = 0; s < 24; s += 1) {
+      if (chunk->sections[s].vertex_buffer != NULL) {
+        continue;
+      }
+      ChunkSection *neighbors[3] = {NULL, NULL, NULL};
+      neighbors[0] = &x_chunk->sections[s];
+      neighbors[2] = &z_chunk->sections[s];
+      if (s > 0) {
+        neighbors[1] = &chunk->sections[s - 1];
+      }
+      chunk_section_update_mesh(&chunk->sections[s], neighbors, device);
+    }
+  }
+}
+
 
 int face_material_between(int a, int b) {
   if (a == 0 && b == 0) {
@@ -196,7 +235,7 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
       // Make a mask
       for (x[u] = 0; x[u] < 16; x[u] += 1) {
         for (x[v] = 0; x[v] < 16; x[v] += 1) {
-          int above = section->data[x[0] + 16 * (x[1] + 16 * x[2])];
+          int above = section->data[x[0] + CHUNK_SIZE * (x[2] + CHUNK_SIZE * x[1])];
           int xb[3] = {x[0], x[1], x[2]};
           xb[d] -= 1;
           int below;
@@ -205,32 +244,32 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
               below = 0;
             } else {
               xb[d] = 15;
-              below = neighbors[d]->data[xb[0] + 16 * (xb[1] + 16 * xb[2])];
+              below = neighbors[d]->data[xb[0] + CHUNK_SIZE * (xb[2] + CHUNK_SIZE * xb[1])];
             }
           } else {
-            below = section->data[xb[0] + 16 * (xb[1] + 16 * xb[2])];
+            below = section->data[xb[0] + CHUNK_SIZE * (xb[2] + CHUNK_SIZE * xb[1])];
           }
-          mask[x[v] + 16 * x[u]] = face_material_between(below, above);
+          mask[x[v] + CHUNK_SIZE * x[u]] = face_material_between(below, above);
         }
       }
 
       // Greedily find a quad where the mask is the same value and repeat
-      for (int j = 0; j < 16; j += 1) {
-        for (int i = 0; i < 16;) {
-          int m = mask[j + 16 * i];
+      for (int j = 0; j < CHUNK_SIZE; j += 1) {
+        for (int i = 0; i < CHUNK_SIZE;) {
+          int m = mask[j + CHUNK_SIZE * i];
           if (m == 0) {
             i += 1;
             continue;
           }
           int w = 1;
-          while (mask[j + 16 * (i + w)] == m && i + w < 16) {
+          while (mask[j + CHUNK_SIZE * (i + w)] == m && i + w < 16) {
             w += 1;
           }
           int h = 1;
           bool done = false;
-          for (; j + h < 16; h += 1) {
+          for (; j + h < CHUNK_SIZE; h += 1) {
             for (int k = 0; k < w; k += 1) {
-              if (mask[(j + h) + 16 * (i + k)] != m) {
+              if (mask[(j + h) + CHUNK_SIZE * (i + k)] != m) {
                 done = true;
                 break;
               }
@@ -248,7 +287,7 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           int dv[3] = {0};
           dv[v] = h;
           int q = section->num_quads * 4 * FLOATS_PER_VERTEX;
-          int material = abs(m);
+          int material = m == 0 ? m : abs(m) % 3 + 1;
           quads[q + 0] = base[0] + x[0];
           quads[q + 1] = base[1] + x[1];
           quads[q + 2] = base[2] + x[2];
@@ -297,7 +336,7 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           // Zero out mask
           for (int l = 0; l < h; l += 1) {
             for (int k = 0; k < w; k += 1) {
-              mask[(j + l) + 16 * (i + k)] = false;
+              mask[(j + l) + CHUNK_SIZE * (i + k)] = false;
             }
           }
         }

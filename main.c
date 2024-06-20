@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "cglm/include/cglm/cglm.h"
+#include "mcclient/mcapi.h"
 #include "chunk.h"
 #include "framework.h"
 #include "lodepng/lodepng.h"
@@ -52,6 +53,17 @@ typedef struct Game {
   vec3 look;
   World world;
 } Game;
+
+Game game = {
+  .movement_speed = 0.1f,
+  .position = {0.0f, 20.0f, 0.0f},
+  .up = {0.0f, 1.0f, 0.0f},
+  .forward = {0.0f, 0.0f, 1.0f},
+  .right = {-1.0f, 0.0f, 0.0f},
+  .look = {0.0f, 0.0f, 1.0f},
+  .eye_height = 1.62,
+  .size = {0.6, 1.8, 0.6},
+};
 
 struct uniforms {
   mat4 view;
@@ -393,6 +405,59 @@ void update_player_position(Game *game, float dt) {
   // CollidePlayer(player_gaussian_, player_eye_height_, gaussians_);
 }
 
+void on_login_success(mcapiConnection* conn, mcapiLoginSuccessPacket packet) {
+  printf("Username: ");
+  mcapi_print_str(packet.username);
+  printf("\nUUID: %016lx%016lx\n", packet.uuid.upper, packet.uuid.lower);
+  printf("%d Properties:\n", packet.number_of_properties);
+  for (int i = 0; i < packet.number_of_properties; i++) {
+    printf("  ");
+    mcapi_print_str(packet.properties[i].name);
+    printf(": ");
+    mcapi_print_str(packet.properties[i].value);
+    printf("\n");
+  }
+
+  mcapi_send_login_acknowledged(conn);
+
+  mcapi_set_state(conn, MCAPI_STATE_CONFIG);
+}
+
+void on_known_packs(mcapiConnection* conn, mcapiClientboundKnownPacksPacket packet) {
+  mcapi_send_serverbound_known_packs(conn, (mcapiServerboundKnownPacksPacket){});
+}
+
+void on_finish_config(mcapiConnection* conn) {
+  mcapi_send_acknowledge_finish_config(conn);
+
+  mcapi_set_state(conn, MCAPI_STATE_PLAY);
+
+  printf("Playing!\n");
+}
+
+void on_chunk(mcapiConnection* conn, mcapiChunkAndLightDataPacket packet) {
+  printf("Got chunk!!! %d, %d\n", packet.chunk_x, packet.chunk_z);
+  Chunk *chunk = malloc(sizeof(Chunk));
+  chunk->x = packet.chunk_x;
+  chunk->z = packet.chunk_z;
+  for (int i = 0; i < 24; i++) {
+    chunk->sections[i].x = packet.chunk_x;
+    chunk->sections[i].y = i - 4;
+    chunk->sections[i].z = packet.chunk_z;
+    memcpy(chunk->sections[i].data, packet.chunk_sections[i].blocks, 4096 * sizeof(int));
+  }
+  world_add_chunk(&game.world, chunk);
+  world_init_new_meshes(&game.world, game.device);
+}
+
+void on_position(mcapiConnection* conn, mcapiSynchronizePlayerPositionPacket packet) {
+  printf("%f %f %f\n", packet.x, packet.y, packet.z);
+  game.position[0] = packet.x;
+  game.position[1] = packet.y;
+  game.position[2] = packet.z;
+  mcapi_send_confirm_teleportation(conn, (mcapiConfirmTeleportationPacket){teleport_id: packet.teleport_id});
+}
+
 int main(int argc, char *argv[]) {
   UNUSED(argc)
   UNUSED(argv)
@@ -400,16 +465,36 @@ int main(int argc, char *argv[]) {
 
   if (!glfwInit()) exit(EXIT_FAILURE);
 
-  Game game = {
-    .movement_speed = 0.1f,
-    .position = {0.0f, 20.0f, 0.0f},
-    .up = {0.0f, 1.0f, 0.0f},
-    .forward = {0.0f, 0.0f, 1.0f},
-    .right = {-1.0f, 0.0f, 0.0f},
-    .look = {0.0f, 0.0f, 1.0f},
-    .eye_height = 1.62,
-    .size = {0.6, 1.8, 0.6},
+  mcapiConnection* conn = mcapi_create_connection("0.0.0.0", 25565);
+
+  mcapi_send_handshake(conn, (mcapiHandshakePacket){
+      .protocol_version = 766,
+      .server_addr = "127.0.0.1",
+      .server_port = 25565,
+      .next_state = 2,
+  });
+
+  mcapi_send_login_start(conn, (mcapiLoginStartPacket){
+      .username = mcapi_to_string("nfdnskl"),
+      .uuid =
+          (mcapiUUID){
+              .upper = 0,
+              .lower = 0,
+          },
+  });
+
+  mcapi_set_state(conn, MCAPI_STATE_LOGIN);
+
+  uint8_t seperator_buf[] = {
+      0xff, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff,
   };
+
+  mcapi_set_login_success_cb(conn, on_login_success);
+  mcapi_set_clientbound_known_packs_cb(conn, on_known_packs);
+  mcapi_set_finish_config_cb(conn, on_finish_config);
+  mcapi_set_chunk_and_light_data_cb(conn, on_chunk);
+  mcapi_set_synchronize_player_position_cb(conn, on_position);
 
   game.instance = wgpuCreateInstance(NULL);
   assert(game.instance);
@@ -717,65 +802,47 @@ int main(int argc, char *argv[]) {
     },
   };
 
-  int n = 0;
-  for (int cx = -2; cx <= 2; cx += 1) {
-    for (int cz = -2; cz <= 2; cz += 1) {
-      Chunk *chunk = malloc(sizeof(Chunk));
-      game.world.chunks[n] = chunk;
-      n += 1;
-      chunk->x = cx;
-      chunk->z = cz;
-      for (int s = 0; s < 24; s += 1) {
-        chunk->sections[s].x = cx;
-        chunk->sections[s].y = s - 4;
-        chunk->sections[s].z = cz;
-        for (int x = 0; x < 16; x += 1) {
-          for (int z = 0; z < 16; z += 1) {
-            for (int y = 0; y < 16; y += 1) {
-              float wx = cx * CHUNK_SIZE + x;
-              float wy = s * CHUNK_SIZE - 64 + y;
-              float wz = cz * CHUNK_SIZE + z;
-              double surface = 5.0f * sin(wx / 3.0f) * cos(wz / 3.0f) + 10.0f;
-              float material = 0;
-              if (wy < surface) {
-                material = 1;
-                if (wy < surface - 2) {
-                  material = 2;
-                }
-                if (wy < surface - 5) {
-                  material = 3;
-                }
-              }
-              chunk->sections[s].data[x + y * 16 + z * 16 * 16] = material;
-            }
-          }
-        }
-      }
-    }
-  }
+  // Create a sample world
 
-  for (int ci = 0; ci < MAX_CHUNKS; ci += 1) {
-    Chunk *chunk = game.world.chunks[ci];
-    if (chunk == NULL) {
-      continue;
-    }
-    Chunk *x_chunk = world_chunk(&game.world, chunk->x - 1, chunk->z);
-    Chunk *z_chunk = world_chunk(&game.world, chunk->x, chunk->z - 1);
-    if (x_chunk == NULL || z_chunk == NULL) {
-      continue;
-    }
-    for (int s = 0; s < 24; s += 1) {
-      ChunkSection *neighbors[3] = {NULL, NULL, NULL};
-      neighbors[0] = &x_chunk->sections[s];
-      neighbors[2] = &z_chunk->sections[s];
-      if (s > 0) {
-        neighbors[1] = &chunk->sections[s - 1];
-      }
-      chunk_section_update_mesh(&chunk->sections[s], neighbors, game.device);
-    }
-  }
+  // int n = 0;
+  // for (int cx = -2; cx <= 2; cx += 1) {
+  //   for (int cz = -2; cz <= 2; cz += 1) {
+  //     Chunk *chunk = malloc(sizeof(Chunk));
+  //     game.world.chunks[n] = chunk;
+  //     n += 1;
+  //     chunk->x = cx;
+  //     chunk->z = cz;
+  //     for (int s = 0; s < 24; s += 1) {
+  //       chunk->sections[s].x = cx;
+  //       chunk->sections[s].y = s - 4;
+  //       chunk->sections[s].z = cz;
+  //       for (int x = 0; x < CHUNK_SIZE; x += 1) {
+  //         for (int z = 0; z < CHUNK_SIZE; z += 1) {
+  //           for (int y = 0; y < CHUNK_SIZE; y += 1) {
+  //             float wx = cx * CHUNK_SIZE + x;
+  //             float wy = s * CHUNK_SIZE - 64 + y;
+  //             float wz = cz * CHUNK_SIZE + z;
+  //             double surface = 5.0f * sin(wx / 15.0f) * cos(wz / 15.0f) + 10.0f;
+  //             float material = 0;
+  //             if (wy < surface) {
+  //               material = 1;
+  //               if (wy < surface - 2) {
+  //                 material = 2;
+  //               }
+  //               if (wy < surface - 5) {
+  //                 material = 3;
+  //               }
+  //             }
+  //             chunk->sections[s].data[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = material;
+  //           }
+  //         }
+  //       }
+  //     }
+  //   }
+  // }
+  // world_init_new_meshes(&game.world, game.device);
 
-  int max_quads = 16 * 16 * 16 * 3;
+  int max_quads = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * 3;
   uint32_t indices[max_quads * 6];
   for (int i = 0; i < max_quads; i += 1) {
     int offset = i * 6;
@@ -899,6 +966,8 @@ int main(int argc, char *argv[]) {
   double targetDeltaTime = 1.0 / 60.0;
 
   while (!glfwWindowShouldClose(window)) {
+    mcapi_poll(conn);
+
     double currentTime = glfwGetTime();
     double deltaTime = currentTime - lastTime;
     if (deltaTime < targetDeltaTime) {
