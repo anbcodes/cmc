@@ -372,7 +372,7 @@ void mcapi_print_buf(mcapiBuffer buf) {
 mcapiString mcapi_to_string(char* c_str) {
   return (mcapiString){
     .ptr = c_str,
-    .len = strlen(c_str), 
+    .len = strlen(c_str),
   };
 }
 
@@ -560,7 +560,7 @@ uint8_t read_byte(ReadableBuffer *io) {
 }
 
 mcapiBuffer read_bytes(ReadableBuffer *io, size_t size) {
-  printf("rbs: len=%d, cursor=%d, count=%d\n", io->buf.len, io->cursor, size);
+  printf("rbs: len=%ld, cursor=%d, count=%ld\n", io->buf.len, io->cursor, size);
   mcapiBuffer buf = {
     .ptr = io->buf.ptr+io->cursor,
     .len = size,
@@ -719,7 +719,7 @@ mcapiString read_string(ReadableBuffer *io) {
     .ptr = io->buf.ptr + io->cursor,
   };
 
-  printf("rs: len=%d, cursor=%d, slen=%d\n", io->buf.len, io->cursor, len);
+  printf("rs: len=%ld, cursor=%d, slen=%d\n", io->buf.len, io->cursor, len);
   io->cursor += len;
 
   return res;
@@ -772,7 +772,7 @@ size_t nbt_reader(void* _p, uint8_t* data, size_t size) {
 
   int to_read = min(size, p->buf.len - p->cursor);
 
-  printf("c: cursor=%d, buflen=%ld, to_read=%d, reqsize=%d\n", p->cursor, p->buf.len, to_read, size);
+  printf("c: cursor=%d, buflen=%ld, to_read=%d, reqsize=%ld\n", p->cursor, p->buf.len, to_read, size);
 
   for (int i = 0; i < to_read; i++) {
     data[i] = read_byte(p);
@@ -788,7 +788,7 @@ mcapiString read_nbt_string(ReadableBuffer *p) {
 
   res.ptr = p->buf.ptr + p->cursor;
 
-  printf("rns: len=%d, cursor=%d, slen=%d\n", p->buf.len, p->cursor, res.len);
+  printf("rns: len=%ld, cursor=%d, slen=%ld\n", p->buf.len, p->cursor, res.len);
 
   p->cursor += res.len;
 
@@ -844,7 +844,7 @@ void read_nbt_value(ReadableBuffer* p, mcapiNBT* nbt, mcapiNBTTagType type) {
       nbt->compound_value.children = calloc(curr_buflen, sizeof(mcapiNBT));
       for (int i = 0;;i++) {
         printf("Compound index %d\n", i);
-        printf("Here 1 cursor=%d len=%d\n", p->cursor, p->buf.len);
+        printf("Here 1 cursor=%d len=%ld\n", p->cursor, p->buf.len);
         if (i >= curr_buflen) {
           int old_buflen = curr_buflen;
           curr_buflen *= 2;
@@ -980,7 +980,7 @@ void mcapi_send_acknowledge_finish_config(mcapiConnection* conn) {
   reusable_buffer.cursor = 0;
   reusable_buffer.buf.len = 0;
   write_varint(&reusable_buffer, ACKNOWLEDGE_FINISH_CONFIG);  // Packet ID
-  
+
   send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
 }
 
@@ -1087,7 +1087,7 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
       uint8_t bits_per_entry = read_byte(p);
       if (bits_per_entry == 0) {
         int value = read_byte(p);
-        
+
         memset(res.chunk_sections[i].blocks, value, 4096);
         read_varint(p); // Read the length of the data array (always 0)
       } else if (bits_per_entry <= 8) {
@@ -1200,7 +1200,7 @@ void mcapi_poll(mcapiConnection* conn) {
         for (int i = 0; i < nbytes_read; i++) {
           if (has_varint(readable)) {
             int len = read_varint(&readable);
-            printf("Read len %ld\n", len);
+            printf("Read len %d\n", len);
             curr_packet = to_readable_buffer(mcapi_create_buffer(len));
             break;
           }
