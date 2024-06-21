@@ -57,7 +57,7 @@ int world_get_material(World *world, vec3 position) {
   return chunk->sections[s].data[x + CHUNK_SIZE * (z + CHUNK_SIZE * y)];
 }
 
-void world_set_block(World *world, vec3 position, int material, WGPUDevice device) {
+void world_set_block(World *world, vec3 position, int material, BlockInfo *block_info, WGPUDevice device) {
   int chunk_x = (int)floor(position[0] / CHUNK_SIZE);
   int chunk_z = (int)floor(position[2] / CHUNK_SIZE);
   Chunk *chunk = world_chunk(world, chunk_x, chunk_z);
@@ -73,22 +73,22 @@ void world_set_block(World *world, vec3 position, int material, WGPUDevice devic
   chunk->sections[s].data[x + CHUNK_SIZE * (z + CHUNK_SIZE * y)] = material;
 
   // Update mesh
-  chunk_section_update_mesh_if_internal(&chunk->sections[s], world, device);
+  chunk_section_update_mesh_if_internal(&chunk->sections[s], world, block_info, device);
 
   // Update neighbors if at upper edge
   if (x == CHUNK_SIZE - 1) {
     Chunk *chunk_x = world_chunk(world, chunk->x + 1, chunk->z);
     if (chunk_x) {
-      chunk_section_update_mesh_if_internal(&chunk_x->sections[s], world, device);
+      chunk_section_update_mesh_if_internal(&chunk_x->sections[s], world, block_info, device);
     }
   }
   if (y == CHUNK_SIZE - 1 && s < Y_SECTIONS - 1) {
-    chunk_section_update_mesh_if_internal(&chunk->sections[s + 1], world, device);
+    chunk_section_update_mesh_if_internal(&chunk->sections[s + 1], world, block_info, device);
   }
   if (z == CHUNK_SIZE - 1) {
     Chunk *chunk_z = world_chunk(world, chunk->x, chunk->z + 1);
     if (chunk_z) {
-      chunk_section_update_mesh_if_internal(&chunk_z->sections[s], world, device);
+      chunk_section_update_mesh_if_internal(&chunk_z->sections[s], world, block_info, device);
     }
   }
 }
@@ -152,7 +152,7 @@ void world_target_block(World *world, vec3 position, vec3 look, float reach, vec
   *material = 0;
 }
 
-void world_init_new_meshes(World *world, WGPUDevice device) {
+void world_init_new_meshes(World *world, BlockInfo *block_info, WGPUDevice device) {
   for (int ci = 0; ci < MAX_CHUNKS; ci += 1) {
     Chunk *chunk = world->chunks[ci];
     if (chunk == NULL) {
@@ -173,13 +173,13 @@ void world_init_new_meshes(World *world, WGPUDevice device) {
       if (s > 0) {
         neighbors[1] = &chunk->sections[s - 1];
       }
-      chunk_section_update_mesh(&chunk->sections[s], neighbors, device);
+      chunk_section_update_mesh(&chunk->sections[s], neighbors, block_info, device);
     }
   }
 }
 
 
-int face_material_between(int a, int b) {
+int face_material_between(int a, int b, BlockInfo *block_info) {
   if (a == 0 && b == 0) {
     return 0;
   }
@@ -191,8 +191,8 @@ int face_material_between(int a, int b) {
   }
   // At this point, neither a or b are air
   // TODO: Need to lookup block transparency
-  bool ta = false;
-  bool tb = false;
+  bool ta = block_info[abs(a)].transparent;
+  bool tb = block_info[abs(b)].transparent;
   if (!ta && !tb) {
     return 0;
   }
@@ -206,7 +206,7 @@ int face_material_between(int a, int b) {
   return a;
 }
 
-void chunk_section_update_mesh_if_internal(ChunkSection *section, World *world, WGPUDevice device) {
+void chunk_section_update_mesh_if_internal(ChunkSection *section, World *world, BlockInfo *block_info, WGPUDevice device) {
   Chunk *chunk = world_chunk(world, section->x, section->z);
   Chunk *x_chunk = world_chunk(world, section->x - 1, section->z);
   Chunk *z_chunk = world_chunk(world, section->x, section->z - 1);
@@ -218,10 +218,10 @@ void chunk_section_update_mesh_if_internal(ChunkSection *section, World *world, 
   if (s > 0) {
     neighbors[1] = &chunk->sections[s - 1];
   }
-  chunk_section_update_mesh(&chunk->sections[s], neighbors, device);
+  chunk_section_update_mesh(&chunk->sections[s], neighbors, block_info, device);
 }
 
-void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3], WGPUDevice device) {
+void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3], BlockInfo *block_info, WGPUDevice device) {
   section->num_quads = 0;
   int mask[16 * 16];
   vec3 base = {section->x * CHUNK_SIZE, section->y * CHUNK_SIZE, section->z * CHUNK_SIZE};
@@ -249,7 +249,7 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           } else {
             below = section->data[xb[0] + CHUNK_SIZE * (xb[2] + CHUNK_SIZE * xb[1])];
           }
-          mask[x[v] + CHUNK_SIZE * x[u]] = face_material_between(below, above);
+          mask[x[v] + CHUNK_SIZE * x[u]] = face_material_between(below, above, block_info);
         }
       }
 
@@ -287,50 +287,82 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           int dv[3] = {0};
           dv[v] = h;
           int q = section->num_quads * 4 * FLOATS_PER_VERTEX;
-          int material = m == 0 ? m : abs(m) % 3 + 1;
+          // int material = m == 0 ? m : abs(m) % 3 + 1;
+          BlockInfo info = block_info[abs(m)];
+          int tile = info.texture;
+          if (tile == 0) {
+            tile = info.texture_all;
+          }
+          if (tile == 0) {
+            tile = info.texture_cross;
+          }
+          if (tile == 0) {
+            tile = info.texture_layer0;
+          }
+          if (d == 1 && info.texture_end != 0) {
+            tile = info.texture_end;
+          }
+          if (m < 0 && d == 1 && info.texture_bottom != 0) {
+            tile = info.texture_bottom;
+          }
+          if (m > 0 && d == 1 && info.texture_top != 0) {
+            tile = info.texture_top;
+          }
+          if (d != 1 && info.texture_side != 0) {
+            tile = info.texture_side;
+          }
+          if (tile == 0) {
+            printf("No texture for %d\n", abs(m));
+          }
+          vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
+          if ((m == 8 || m == 9) && d == 1) {
+            color[0] = 0.5f;
+            color[1] = 1.0f;
+            color[2] = 0.5f;
+          }
           quads[q + 0] = base[0] + x[0];
           quads[q + 1] = base[1] + x[1];
           quads[q + 2] = base[2] + x[2];
-          quads[q + 3] = 1.0f;
-          quads[q + 4] = 0.0f;
-          quads[q + 5] = 0.0f;
-          quads[q + 6] = 1.0f;
+          quads[q + 3] = color[0];
+          quads[q + 4] = color[1];
+          quads[q + 5] = color[2];
+          quads[q + 6] = color[3];
           quads[q + 7] = w;
           quads[q + 8] = h;
-          quads[q + 9] = material;
+          quads[q + 9] = tile;
           q += FLOATS_PER_VERTEX;
           quads[q + 0] = base[0] + x[0] + du[0];
           quads[q + 1] = base[1] + x[1] + du[1];
           quads[q + 2] = base[2] + x[2] + du[2];
-          quads[q + 3] = 0.0f;
-          quads[q + 4] = 1.0f;
-          quads[q + 5] = 0.0f;
-          quads[q + 6] = 1.0f;
+          quads[q + 3] = color[0];
+          quads[q + 4] = color[1];
+          quads[q + 5] = color[2];
+          quads[q + 6] = color[3];
           quads[q + 7] = 0.0f;
           quads[q + 8] = h;
-          quads[q + 9] = material;
+          quads[q + 9] = tile;
           q += FLOATS_PER_VERTEX;
           quads[q + 0] = base[0] + x[0] + du[0] + dv[0];
           quads[q + 1] = base[1] + x[1] + du[1] + dv[1];
           quads[q + 2] = base[2] + x[2] + du[2] + dv[2];
-          quads[q + 3] = 1.0f;
-          quads[q + 4] = 1.0f;
-          quads[q + 5] = 1.0f;
-          quads[q + 6] = 1.0f;
+          quads[q + 3] = color[0];
+          quads[q + 4] = color[1];
+          quads[q + 5] = color[2];
+          quads[q + 6] = color[3];
           quads[q + 7] = 0.0f;
           quads[q + 8] = 0.0f;
-          quads[q + 9] = material;
+          quads[q + 9] = tile;
           q += FLOATS_PER_VERTEX;
           quads[q + 0] = base[0] + x[0] + dv[0];
           quads[q + 1] = base[1] + x[1] + dv[1];
           quads[q + 2] = base[2] + x[2] + dv[2];
-          quads[q + 3] = 0.0f;
-          quads[q + 4] = 0.0f;
-          quads[q + 5] = 1.0f;
-          quads[q + 6] = 1.0f;
+          quads[q + 3] = color[0];
+          quads[q + 4] = color[1];
+          quads[q + 5] = color[2];
+          quads[q + 6] = color[3];
           quads[q + 7] = w;
           quads[q + 8] = 0.0f;
-          quads[q + 9] = material;
+          quads[q + 9] = tile;
           section->num_quads += 1;
 
           // Zero out mask

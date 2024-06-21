@@ -3,3 +3,6 @@ wgpu
 GLFW
 GLFW-src
 cglm
+data
+core
+texture_sheet.png

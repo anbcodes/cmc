@@ -7,9 +7,31 @@
 * From the main directory, run `git clone https://github.com/recp/cglm.git` to get cglm. It works as a header-only library.
 * To compile
 ```
-gcc main.c framework.c chunk.c lodepng/lodepng.c wgpu/libwgpu_native.a GLFW/lib/libglfw3.a -lm
+gcc main.c framework.c chunk.c mcclient/mcapi.c cJSON.c lodepng/lodepng.c wgpu/libwgpu_native.a GLFW/lib/libglfw3.a -lm
 ```
 * This creates the executable `a.out`
+
+## Setup needed from Minecraft
+
+To retrieve `blocks.json`:
+
+```
+java -DbundlerMainClass=net.minecraft.data.Main -jar paper-1.20.6-145.jar
+```
+
+To figure out which texture keys there are in model files:
+
+```
+jq -r '.textures | keys[]' block/*.json | sort | uniq -c | sort -nr
+```
+
+## Debugging
+
+If there is a core dump:
+
+```
+coredumpctl dump -r `pwd`/a.out > core && gdb a.out -c core
+```
 
 ## Notes on how I got started with a WebGPU example in C
 

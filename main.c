@@ -4,11 +4,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cJSON.h"
 #include "cglm/include/cglm/cglm.h"
-#include "mcclient/mcapi.h"
 #include "chunk.h"
 #include "framework.h"
 #include "lodepng/lodepng.h"
+#include "mcclient/mcapi.h"
 #include "wgpu/webgpu.h"
 #include "wgpu/wgpu.h"
 
@@ -23,7 +24,12 @@
 #include "GLFW/include/GLFW/glfw3native.h"
 
 #define LOG_PREFIX "[triangle]"
+#define MAX_BLOCKS 65536
 
+#define TEXTURE_SIZE 16
+// There are 899 textures in 1.20.6 - Should fit in 32*32 = 1024 sheet
+// #define TEXTURE_TILES 32
+#define TEXTURE_TILES 40
 
 const float COLLISION_EPSILON = 0.001f;
 const float TURN_SPEED = 0.002f;
@@ -42,6 +48,7 @@ typedef struct Game {
   bool keys[GLFW_KEY_LAST + 1];
   bool mouse_captured;
   vec2 last_mouse;
+  BlockInfo block_info[MAX_BLOCKS];
   float elevation;
   float movement_speed;
   bool on_ground;
@@ -83,6 +90,45 @@ unsigned char *load_image(const char *filename, unsigned *width, unsigned *heigh
     }
   }
   return NULL;
+}
+
+unsigned save_image(const char *filename, unsigned char *image, unsigned width, unsigned height) {
+  unsigned char *png = NULL;
+  size_t pngsize;
+
+  unsigned error = lodepng_encode32(&png, &pngsize, image, width, height);
+  if (!error) {
+    error = lodepng_save_file(png, pngsize, filename);
+  }
+
+  free(png);
+  return error;
+}
+
+cJSON *load_json(const char *filename) {
+  FILE *file = fopen(filename, "rb");
+  if (file == NULL) {
+    return NULL;
+  }
+
+  fseek(file, 0, SEEK_END);
+  long length = ftell(file);
+  fseek(file, 0, SEEK_SET);
+
+  char *buffer = malloc(length + 1);
+  if (buffer == NULL) {
+    fclose(file);
+    return NULL;
+  }
+
+  fread(buffer, 1, length, file);
+  buffer[length] = '\0';
+  fclose(file);
+
+  cJSON *json = cJSON_Parse(buffer);
+  free(buffer);
+
+  return json;
 }
 
 static void handle_request_adapter(
@@ -209,12 +255,12 @@ static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int act
       if (material != 0) {
         switch (button) {
           case GLFW_MOUSE_BUTTON_LEFT:
-            world_set_block(&game->world, target, 0, game->device);
+            world_set_block(&game->world, target, 0, game->block_info, game->device);
             break;
           case GLFW_MOUSE_BUTTON_RIGHT:
             vec3 air_position;
             glm_vec3_add(target, normal, air_position);
-            world_set_block(&game->world, air_position, 1, game->device);
+            world_set_block(&game->world, air_position, 1, game->block_info, game->device);
             break;
         }
       }
@@ -240,7 +286,7 @@ void game_update_player_y(Game *game, float delta) {
     for (int dx = -1; dx <= 1; dx += 2) {
       for (int dz = -1; dz <= 1; dz += 2) {
         int m = world_get_material(w, (vec3){p[0] + dx * sz[0], new_y + sz[1], p[2] + dz * sz[2]});
-        if (m != 0) {
+        if (!game->block_info[m].passable) {
           game->position[1] = floor(new_y + sz[1]) - sz[1] - COLLISION_EPSILON;
           game->velocity[1] = 0;
           return;
@@ -253,7 +299,7 @@ void game_update_player_y(Game *game, float delta) {
     for (int dx = -1; dx <= 1; dx += 2) {
       for (int dz = -1; dz <= 1; dz += 2) {
         int m = world_get_material(w, (vec3){p[0] + dx * sz[0], new_y, p[2] + dz * sz[2]});
-        if (m != 0) {
+        if (!game->block_info[m].passable) {
           game->position[1] = ceil(new_y) + COLLISION_EPSILON;
           game->velocity[1] = 0;
           game->on_ground = true;
@@ -277,7 +323,7 @@ void game_update_player_x(Game *game, float delta) {
     for (int dz = -1; dz <= 1; dz += 2) {
       for (int dy = 0; dy < sz[1]; dy += 1) {
         int m = world_get_material(w, (vec3){new_x + sz[0], p[1] + dy, p[2] + dz * sz[2]});
-        if (m != 0) {
+        if (!game->block_info[m].passable) {
           game->position[0] = floor(new_x + sz[0]) - sz[0] - COLLISION_EPSILON;
           game->velocity[0] = 0;
           return;
@@ -290,7 +336,7 @@ void game_update_player_x(Game *game, float delta) {
     for (int dz = -1; dz <= 1; dz += 2) {
       for (int dy = 0; dy < sz[1]; dy += 1) {
         int m = world_get_material(w, (vec3){new_x - sz[0], p[1] + dy, p[2] + dz * sz[2]});
-        if (m != 0) {
+        if (!game->block_info[m].passable) {
           game->position[0] = ceil(new_x - sz[0]) + sz[0] + COLLISION_EPSILON;
           game->velocity[0] = 0;
           return;
@@ -313,7 +359,7 @@ void game_update_player_z(Game *game, float delta) {
     for (int dx = -1; dx <= 1; dx += 2) {
       for (int dy = 0; dy < sz[1]; dy += 1) {
         int m = world_get_material(w, (vec3){p[0] + dx * sz[0], p[1] + dy, new_z + sz[2]});
-        if (m != 0) {
+        if (!game->block_info[m].passable) {
           game->position[2] = floor(new_z + sz[2]) - sz[2] - COLLISION_EPSILON;
           game->velocity[2] = 0;
           return;
@@ -326,7 +372,7 @@ void game_update_player_z(Game *game, float delta) {
     for (int dx = -1; dx <= 1; dx += 2) {
       for (int dy = 0; dy < sz[1]; dy += 1) {
         int m = world_get_material(w, (vec3){p[0] + dx * sz[0], p[1] + dy, new_z - sz[2]});
-        if (m != 0) {
+        if (!game->block_info[m].passable) {
           game->position[2] = ceil(new_z - sz[2]) + sz[2] + COLLISION_EPSILON;
           game->velocity[2] = 0;
           return;
@@ -405,7 +451,7 @@ void update_player_position(Game *game, float dt) {
   // CollidePlayer(player_gaussian_, player_eye_height_, gaussians_);
 }
 
-void on_login_success(mcapiConnection* conn, mcapiLoginSuccessPacket packet) {
+void on_login_success(mcapiConnection *conn, mcapiLoginSuccessPacket packet) {
   printf("Username: ");
   mcapi_print_str(packet.username);
   printf("\nUUID: %016lx%016lx\n", packet.uuid.upper, packet.uuid.lower);
@@ -423,11 +469,11 @@ void on_login_success(mcapiConnection* conn, mcapiLoginSuccessPacket packet) {
   mcapi_set_state(conn, MCAPI_STATE_CONFIG);
 }
 
-void on_known_packs(mcapiConnection* conn, mcapiClientboundKnownPacksPacket packet) {
+void on_known_packs(mcapiConnection *conn, mcapiClientboundKnownPacksPacket packet) {
   mcapi_send_serverbound_known_packs(conn, (mcapiServerboundKnownPacksPacket){});
 }
 
-void on_finish_config(mcapiConnection* conn) {
+void on_finish_config(mcapiConnection *conn) {
   mcapi_send_acknowledge_finish_config(conn);
 
   mcapi_set_state(conn, MCAPI_STATE_PLAY);
@@ -435,8 +481,7 @@ void on_finish_config(mcapiConnection* conn) {
   printf("Playing!\n");
 }
 
-void on_chunk(mcapiConnection* conn, mcapiChunkAndLightDataPacket packet) {
-  printf("Got chunk!!! %d, %d\n", packet.chunk_x, packet.chunk_z);
+void on_chunk(mcapiConnection *conn, mcapiChunkAndLightDataPacket packet) {
   Chunk *chunk = malloc(sizeof(Chunk));
   chunk->x = packet.chunk_x;
   chunk->z = packet.chunk_z;
@@ -445,50 +490,93 @@ void on_chunk(mcapiConnection* conn, mcapiChunkAndLightDataPacket packet) {
     chunk->sections[i].y = i - 4;
     chunk->sections[i].z = packet.chunk_z;
     memcpy(chunk->sections[i].data, packet.chunk_sections[i].blocks, 4096 * sizeof(int));
+    for (int b = 0; b < 64; b += 1) {
+      printf("%d ", packet.chunk_sections[i].biomes[b]);
+    }
+    printf("\n");
   }
   world_add_chunk(&game.world, chunk);
-  world_init_new_meshes(&game.world, game.device);
+  world_init_new_meshes(&game.world, game.block_info, game.device);
 }
 
-void on_position(mcapiConnection* conn, mcapiSynchronizePlayerPositionPacket packet) {
+void on_position(mcapiConnection *conn, mcapiSynchronizePlayerPositionPacket packet) {
   printf("%f %f %f\n", packet.x, packet.y, packet.z);
   game.position[0] = packet.x;
   game.position[1] = packet.y;
   game.position[2] = packet.z;
-  mcapi_send_confirm_teleportation(conn, (mcapiConfirmTeleportationPacket){teleport_id: packet.teleport_id});
+  mcapi_send_confirm_teleportation(conn, (mcapiConfirmTeleportationPacket){teleport_id : packet.teleport_id});
+}
+
+int add_texture(cJSON *textures, const char *name, unsigned char *texture_sheet, int *cur_texture) {
+  char fname[1000];
+  cJSON *texture = cJSON_GetObjectItemCaseSensitive(textures, name);
+  if (texture == NULL) {
+    return 0;
+  }
+  char *texture_name = texture->valuestring;
+  if (strncmp(texture_name, "minecraft:", 10) == 0) {
+    texture_name += 10;
+  }
+  snprintf(fname, 1000, "data/assets/minecraft/textures/%s.png", texture_name);
+  unsigned int width, height;
+  unsigned char *rgba = load_image(fname, &width, &height);
+  if (rgba == NULL) {
+    printf("%s not found for %s\n", name, texture_name);
+    return 0;
+  } else {
+    printf("%s found for %s, %d\n", name, texture_name, *cur_texture);
+  }
+  int texture_id = *cur_texture;
+  *cur_texture += 1;
+  int full_width = TEXTURE_SIZE * TEXTURE_TILES;
+  int tile_start_x = (texture_id % TEXTURE_TILES) * TEXTURE_SIZE;
+  int tile_start_y = (texture_id / TEXTURE_TILES) * TEXTURE_SIZE;
+  width = glm_min(width, TEXTURE_SIZE);
+  height = glm_min(height, TEXTURE_SIZE);
+  for (int y = 0; y < height; y++) {
+    for (int x = 0; x < width; x++) {
+      int i = (y * width + x) * 4;
+      int j = ((tile_start_y + y) * full_width + (tile_start_x + x)) * 4;
+      // int j = (texture_id * TEXTURE_SIZE * TEXTURE_SIZE + y * TEXTURE_SIZE + x) * 4;
+      texture_sheet[j + 0] = rgba[i + 0];
+      texture_sheet[j + 1] = rgba[i + 1];
+      texture_sheet[j + 2] = rgba[i + 2];
+      texture_sheet[j + 3] = rgba[i + 3];
+    }
+  }
+  return texture_id;
 }
 
 int main(int argc, char *argv[]) {
   UNUSED(argc)
   UNUSED(argv)
+
   frmwrk_setup_logging(WGPULogLevel_Warn);
 
-  if (!glfwInit()) exit(EXIT_FAILURE);
+  mcapiConnection *conn = mcapi_create_connection("0.0.0.0", 25565);
 
-  mcapiConnection* conn = mcapi_create_connection("0.0.0.0", 25565);
-
-  mcapi_send_handshake(conn, (mcapiHandshakePacket){
+  mcapi_send_handshake(
+    conn,
+    (mcapiHandshakePacket){
       .protocol_version = 766,
       .server_addr = "127.0.0.1",
       .server_port = 25565,
       .next_state = 2,
-  });
+    }
+  );
 
-  mcapi_send_login_start(conn, (mcapiLoginStartPacket){
+  mcapi_send_login_start(
+    conn,
+    (mcapiLoginStartPacket){
       .username = mcapi_to_string("nfdnskl"),
-      .uuid =
-          (mcapiUUID){
-              .upper = 0,
-              .lower = 0,
-          },
-  });
+      .uuid = (mcapiUUID){
+        .upper = 0,
+        .lower = 0,
+      },
+    }
+  );
 
   mcapi_set_state(conn, MCAPI_STATE_LOGIN);
-
-  uint8_t seperator_buf[] = {
-      0xff, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff,
-  };
 
   mcapi_set_login_success_cb(conn, on_login_success);
   mcapi_set_clientbound_known_packs_cb(conn, on_known_packs);
@@ -496,12 +584,123 @@ int main(int argc, char *argv[]) {
   mcapi_set_chunk_and_light_data_cb(conn, on_chunk);
   mcapi_set_synchronize_player_position_cb(conn, on_position);
 
+  int num_id = 0;
+  int max_id = -1;
+  int cur_texture = 1;
+  char fname[1000];
+  cJSON *blocks = load_json("data/blocks.json");
+  cJSON *block = blocks->child;
+  unsigned char texture_sheet[TEXTURE_SIZE * TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_TILES * 4] = {0};
+  while (block != NULL) {
+    BlockInfo info = {0};
+    char *block_name = block->string;
+    if (strncmp(block_name, "minecraft:", 10) == 0) {
+      block_name += 10;
+    }
+
+    cJSON *definition = cJSON_GetObjectItemCaseSensitive(block, "definition");
+    cJSON *type = cJSON_GetObjectItemCaseSensitive(definition, "type");
+    if (
+      strcmp(type->valuestring, "minecraft:air") == 0 ||
+      strcmp(type->valuestring, "minecraft:flower") == 0 ||
+      strcmp(type->valuestring, "minecraft:tall_grass") == 0 ||
+      strcmp(type->valuestring, "minecraft:double_plant") == 0
+    ) {
+      info.passable = true;
+      info.transparent = true;
+    }
+    if (strcmp(type->valuestring, "minecraft:leaves") == 0) {
+      info.passable = false;
+      info.transparent = true;
+    }
+
+    snprintf(fname, 1000, "data/assets/minecraft/models/block/%s.json", block_name);
+    cJSON *model = load_json(fname);
+    if (model == NULL) {
+      snprintf(fname, 1000, "data/assets/minecraft/models/item/%s.json", block_name);
+      model = load_json(fname);
+    }
+    if (model == NULL) {
+      snprintf(fname, 1000, "data/assets/minecraft/blockstates/%s.json", block_name);
+      cJSON *blockstate = load_json(fname);
+      if (blockstate == NULL) {
+        printf("blockstate not found for %s\n", block_name);
+        block = block->next;
+        continue;
+      }
+      cJSON *variants = cJSON_GetObjectItemCaseSensitive(blockstate, "variants");
+      if (variants == NULL) {
+        printf("variants not found for %s\n", block_name);
+        block = block->next;
+        continue;
+      }
+      cJSON *variant = variants->child;
+      if (variant == NULL) {
+        printf("variant not found for %s\n", block_name);
+        block = block->next;
+        continue;
+      }
+      cJSON *model_name = cJSON_GetObjectItemCaseSensitive(variant, "model");
+      if (model_name == NULL) {
+        printf("model not found for %s\n", block_name);
+        block = block->next;
+        continue;
+      }
+      char *model_name_str = model_name->valuestring;
+      if (strncmp(model_name_str, "minecraft:", 10) == 0) {
+        model_name_str += 10;
+      }
+      snprintf(fname, 1000, "data/assets/minecraft/models/%s.json", model_name_str);
+      model = load_json(fname);
+    }
+    if (model == NULL) {
+      printf("model not found for %s\n", block_name);
+      block = block->next;
+      continue;
+    }
+    cJSON *textures = cJSON_GetObjectItemCaseSensitive(model, "textures");
+
+    info.texture = add_texture(textures, "texture", texture_sheet, &cur_texture);
+    info.texture_bottom = add_texture(textures, "bottom", texture_sheet, &cur_texture);
+    info.texture_top = add_texture(textures, "top", texture_sheet, &cur_texture);
+    info.texture_end = add_texture(textures, "end", texture_sheet, &cur_texture);
+    info.texture_side = add_texture(textures, "side", texture_sheet, &cur_texture);
+    info.texture_overlay = add_texture(textures, "overlay", texture_sheet, &cur_texture);
+    info.texture_all = add_texture(textures, "all", texture_sheet, &cur_texture);
+    info.texture_cross = add_texture(textures, "cross", texture_sheet, &cur_texture);
+    info.texture_layer0 = add_texture(textures, "layer0", texture_sheet, &cur_texture);
+
+    cJSON *states = cJSON_GetObjectItemCaseSensitive(block, "states");
+    if (states != NULL) {
+      cJSON *state = states->child;
+      while (state != NULL) {
+        cJSON *state_id = cJSON_GetObjectItemCaseSensitive(state, "id");
+        if (state_id != NULL && cJSON_IsNumber(state_id)) {
+          int id = state_id->valueint;
+          num_id += 1;
+          if (id > max_id) {
+            max_id = id;
+          }
+          game.block_info[id] = info;
+        }
+        state = state->next;
+      }
+    }
+    block = block->next;
+  }
+  printf("max id: %d\n", max_id);
+  printf("num id: %d\n", num_id);
+  printf("num textures: %d\n", cur_texture);
+  save_image("texture_sheet.png", texture_sheet, TEXTURE_SIZE * TEXTURE_TILES, TEXTURE_SIZE * TEXTURE_TILES);
+
   game.instance = wgpuCreateInstance(NULL);
   assert(game.instance);
 
+  if (!glfwInit()) exit(EXIT_FAILURE);
+
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   GLFWwindow *window =
-    glfwCreateWindow(640, 480, "triangle [wgpu-native + glfw]", NULL, NULL);
+    glfwCreateWindow(640, 480, "cmc", NULL, NULL);
   assert(window);
 
   glfwSetWindowUserPointer(window, (void *)&game);
@@ -621,16 +820,16 @@ int main(int argc, char *argv[]) {
     frmwrk_load_shader_module(game.device, "shader.wgsl");
   assert(shader_module);
 
-  unsigned int texture_width;
-  unsigned int texture_height;
-  unsigned char *image_data = load_image("texture-2.png", &texture_width, &texture_height);
+  // unsigned int texture_width;
+  // unsigned int texture_height;
+  // unsigned char *image_data = load_image("texture-2.png", &texture_width, &texture_height);
 
   WGPUTextureDescriptor texture_descriptor = {
     .usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding,
     .dimension = WGPUTextureDimension_2D,
     .size = {
-      .width = texture_width,
-      .height = texture_height,
+      .width = TEXTURE_SIZE * TEXTURE_TILES,
+      .height = TEXTURE_SIZE * TEXTURE_TILES,
       .depthOrArrayLayers = 1,
     },
     .format = WGPUTextureFormat_RGBA8UnormSrgb,
@@ -668,8 +867,8 @@ int main(int argc, char *argv[]) {
     game.device,
     &(const frmwrk_buffer_init_descriptor){
       .label = "Texture Buffer",
-      .content = (void *)image_data,
-      .content_size = texture_width * texture_height * 4,
+      .content = (void *)texture_sheet,
+      .content_size = TEXTURE_SIZE * TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_TILES * 4,
       .usage = WGPUBufferUsage_CopySrc,
     }
   );
@@ -677,37 +876,35 @@ int main(int argc, char *argv[]) {
   WGPUImageCopyBuffer image_copy_buffer = {
     .buffer = buffer,
     .layout = {
-      .bytesPerRow = texture_width * 4,
-      .rowsPerImage = texture_height,
+      .bytesPerRow = TEXTURE_SIZE * TEXTURE_TILES * 4,
+      .rowsPerImage = TEXTURE_SIZE * TEXTURE_TILES,
     },
   };
   WGPUImageCopyTexture image_copy_texture = {
     .texture = texture,
   };
   WGPUExtent3D copy_size = {
-    .width = texture_width,
-    .height = texture_height,
+    .width = TEXTURE_SIZE * TEXTURE_TILES,
+    .height = TEXTURE_SIZE * TEXTURE_TILES,
     .depthOrArrayLayers = 1,
   };
 
   WGPUTextureDataLayout texture_data_layout = {
     .offset = 0,
-    .bytesPerRow = texture_width * 4,
-    .rowsPerImage = texture_height,
+    .bytesPerRow = TEXTURE_SIZE * TEXTURE_TILES * 4,
+    .rowsPerImage = TEXTURE_SIZE * TEXTURE_TILES,
   };
 
-  size_t dataSize = texture_width * texture_height * 4;
+  size_t dataSize = TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_SIZE * TEXTURE_TILES * 4;
 
   wgpuQueueWriteTexture(
     queue,
     &image_copy_texture,
-    image_data,
+    texture_sheet,
     dataSize,
     &texture_data_layout,
     &copy_size
   );
-
-  free(image_data);
 
   struct uniforms uniforms = {
     .view = GLM_MAT4_IDENTITY_INIT,

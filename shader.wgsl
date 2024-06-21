@@ -3,6 +3,8 @@ struct Uniforms {
   projection: mat4x4<f32>,
 }
 
+const TEXTURE_TILES = 40.0f;
+
 @group(0) @binding(0)
 var<uniform> uniforms: Uniforms;
 
@@ -29,7 +31,7 @@ struct VertexOutput {
 @vertex
 fn vs_main(vertex: Vertex) -> VertexOutput {
   var out: VertexOutput;
-  var patchCount = vec2<f32>(4.0, 4.0);
+  var patchCount = vec2<f32>(TEXTURE_TILES, TEXTURE_TILES);
   var patchIndex = vec2<f32>(vertex.material % patchCount.x, floor(vertex.material / patchCount.x));
   var patchSize = vec2<f32>(1.0 / patchCount.x, 1.0 / patchCount.y);
 
@@ -42,9 +44,13 @@ fn vs_main(vertex: Vertex) -> VertexOutput {
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
-  var patchCount = vec2<f32>(4.0, 4.0);
+  var patchCount = vec2<f32>(TEXTURE_TILES, TEXTURE_TILES);
   var patchSize = vec2(1.0 / patchCount.x, 1.0 / patchCount.y);
   var texCoord = vertex.patchCoord + fract(vertex.coord) * patchSize;
   // return vertex.color;
-  return textureSample(image_texture, image_sampler, texCoord);
+  var color = textureSample(image_texture, image_sampler, texCoord) * vertex.color;
+  if (color.a == 0.0f) {
+    discard;
+  }
+  return color;
 }
