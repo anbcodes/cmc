@@ -57,7 +57,29 @@ int world_get_material(World *world, vec3 position) {
   return chunk->sections[s].data[x + CHUNK_SIZE * (z + CHUNK_SIZE * y)];
 }
 
-void world_set_block(World *world, vec3 position, int material, BlockInfo *block_info, WGPUDevice device) {
+void world_get_sky_color(World *world, vec3 position, BiomeInfo *biome_info, vec3 sky_color) {
+  int chunk_x = (int)floor(position[0] / CHUNK_SIZE);
+  int chunk_z = (int)floor(position[2] / CHUNK_SIZE);
+  Chunk *chunk = world_chunk(world, chunk_x, chunk_z);
+  if (chunk == NULL) {
+    glm_vec3_copy((vec3){0.0f, 0.0f, 0.0f}, sky_color);
+    return;
+  }
+  vec3 chunk_position;
+  glm_vec3_sub(position, (vec3){chunk->x * CHUNK_SIZE, 0.0f, chunk->z * CHUNK_SIZE}, chunk_position);
+  int x = (int)floor(chunk_position[0]);
+  int y = positive_mod((int)floor(chunk_position[1]), CHUNK_SIZE);
+  int z = (int)floor(chunk_position[2]);
+  int s = (int)floor(chunk_position[1] / CHUNK_SIZE) + 4;
+  int biome_x = floor(x / 4);
+  int biome_z = floor(z / 4);
+  int biome_y = floor(y / 4);
+  int biome_index = chunk->sections[s].biome_data[biome_x + 4 * (biome_z + 4 * biome_y)];
+  BiomeInfo biome = biome_info[biome_index];
+  glm_vec3_copy(biome.sky_color, sky_color);
+}
+
+void world_set_block(World *world, vec3 position, int material, BlockInfo *block_info, BiomeInfo *biome_info, WGPUDevice device) {
   int chunk_x = (int)floor(position[0] / CHUNK_SIZE);
   int chunk_z = (int)floor(position[2] / CHUNK_SIZE);
   Chunk *chunk = world_chunk(world, chunk_x, chunk_z);
@@ -73,22 +95,22 @@ void world_set_block(World *world, vec3 position, int material, BlockInfo *block
   chunk->sections[s].data[x + CHUNK_SIZE * (z + CHUNK_SIZE * y)] = material;
 
   // Update mesh
-  chunk_section_update_mesh_if_internal(&chunk->sections[s], world, block_info, device);
+  chunk_section_update_mesh_if_internal(&chunk->sections[s], world, block_info, biome_info, device);
 
   // Update neighbors if at upper edge
   if (x == CHUNK_SIZE - 1) {
     Chunk *chunk_x = world_chunk(world, chunk->x + 1, chunk->z);
     if (chunk_x) {
-      chunk_section_update_mesh_if_internal(&chunk_x->sections[s], world, block_info, device);
+      chunk_section_update_mesh_if_internal(&chunk_x->sections[s], world, block_info, biome_info, device);
     }
   }
   if (y == CHUNK_SIZE - 1 && s < Y_SECTIONS - 1) {
-    chunk_section_update_mesh_if_internal(&chunk->sections[s + 1], world, block_info, device);
+    chunk_section_update_mesh_if_internal(&chunk->sections[s + 1], world, block_info, biome_info, device);
   }
   if (z == CHUNK_SIZE - 1) {
     Chunk *chunk_z = world_chunk(world, chunk->x, chunk->z + 1);
     if (chunk_z) {
-      chunk_section_update_mesh_if_internal(&chunk_z->sections[s], world, block_info, device);
+      chunk_section_update_mesh_if_internal(&chunk_z->sections[s], world, block_info, biome_info, device);
     }
   }
 }
@@ -152,7 +174,7 @@ void world_target_block(World *world, vec3 position, vec3 look, float reach, vec
   *material = 0;
 }
 
-void world_init_new_meshes(World *world, BlockInfo *block_info, WGPUDevice device) {
+void world_init_new_meshes(World *world, BlockInfo *block_info, BiomeInfo *biome_info, WGPUDevice device) {
   for (int ci = 0; ci < MAX_CHUNKS; ci += 1) {
     Chunk *chunk = world->chunks[ci];
     if (chunk == NULL) {
@@ -173,7 +195,7 @@ void world_init_new_meshes(World *world, BlockInfo *block_info, WGPUDevice devic
       if (s > 0) {
         neighbors[1] = &chunk->sections[s - 1];
       }
-      chunk_section_update_mesh(&chunk->sections[s], neighbors, block_info, device);
+      chunk_section_update_mesh(&chunk->sections[s], neighbors, block_info, biome_info, device);
     }
   }
 }
@@ -206,7 +228,7 @@ int face_material_between(int a, int b, BlockInfo *block_info) {
   return a;
 }
 
-void chunk_section_update_mesh_if_internal(ChunkSection *section, World *world, BlockInfo *block_info, WGPUDevice device) {
+void chunk_section_update_mesh_if_internal(ChunkSection *section, World *world, BlockInfo *block_info, BiomeInfo *biome_info, WGPUDevice device) {
   Chunk *chunk = world_chunk(world, section->x, section->z);
   Chunk *x_chunk = world_chunk(world, section->x - 1, section->z);
   Chunk *z_chunk = world_chunk(world, section->x, section->z - 1);
@@ -218,10 +240,10 @@ void chunk_section_update_mesh_if_internal(ChunkSection *section, World *world, 
   if (s > 0) {
     neighbors[1] = &chunk->sections[s - 1];
   }
-  chunk_section_update_mesh(&chunk->sections[s], neighbors, block_info, device);
+  chunk_section_update_mesh(&chunk->sections[s], neighbors, block_info, biome_info, device);
 }
 
-void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3], BlockInfo *block_info, WGPUDevice device) {
+void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3], BlockInfo *block_info, BiomeInfo *biome_info, WGPUDevice device) {
   section->num_quads = 0;
   int mask[16 * 16];
   vec3 base = {section->x * CHUNK_SIZE, section->y * CHUNK_SIZE, section->z * CHUNK_SIZE};
@@ -229,6 +251,11 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
     int u = (d + 1) % 3;
     int v = (d + 2) % 3;
     int x[3] = {0, 0, 0};
+
+    if (d == 0) {
+      u = (d + 2) % 3;
+      v = (d + 1) % 3;
+    }
 
     // Go over all the slices in this dimension
     for (x[d] = 0; x[d] < 16; x[d] += 1) {
@@ -287,7 +314,6 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           int dv[3] = {0};
           dv[v] = h;
           int q = section->num_quads * 4 * FLOATS_PER_VERTEX;
-          // int material = m == 0 ? m : abs(m) % 3 + 1;
           BlockInfo info = block_info[abs(m)];
           int tile = info.texture;
           if (tile == 0) {
@@ -311,14 +337,38 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           if (d != 1 && info.texture_side != 0) {
             tile = info.texture_side;
           }
-          if (tile == 0) {
-            printf("No texture for %d\n", abs(m));
-          }
+
+          // Get the biome color
           vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
-          if ((m == 8 || m == 9) && d == 1) {
-            color[0] = 0.5f;
-            color[1] = 1.0f;
-            color[2] = 0.5f;
+          ivec3 biome_x = {floor(x[0] / 4), floor(x[1] / 4), floor(x[2] / 4)};
+          int biome_index = section->biome_data[biome_x[0] + 4 * (biome_x[2] + 4 * biome_x[1])];
+          // printf("Biome index: %d\n", biome_index);
+          BiomeInfo biome = biome_info[biome_index];
+          if (block_info[abs(m)].grass) {
+            // Don't set the grass color for the bottom of the block
+            if (!(d == 1 && m < 0)) {
+              glm_vec3_copy(biome.grass_color, color);
+            }
+          }
+          if (block_info[abs(m)].foliage) {
+            glm_vec3_copy(biome.foliage_color, color);
+          }
+          // if (((m == 8 || m == 9) && d == 1) || ((abs(m) == 8 || abs(m) == 9) && d != 1)) {
+          //   glm_vec3_copy(biome.grass_color, color);
+          // }
+          // if (m == 12 && d == 1) {
+          //   glm_vec3_copy(biome.foliage_color, color);
+          // }
+
+          // if (tile == 0) {
+          //   printf("No texture for %d\n", abs(m));
+          // }
+
+          // Needed for grass overlay on the sides
+          // Would need something like this for redstone and maybe a few other things
+          int overlay_tile = 0;
+          if (d != 1 && info.texture_overlay != 0) {
+            overlay_tile = info.texture_overlay;
           }
           quads[q + 0] = base[0] + x[0];
           quads[q + 1] = base[1] + x[1];
@@ -330,6 +380,7 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           quads[q + 7] = w;
           quads[q + 8] = h;
           quads[q + 9] = tile;
+          quads[q + 10] = overlay_tile;
           q += FLOATS_PER_VERTEX;
           quads[q + 0] = base[0] + x[0] + du[0];
           quads[q + 1] = base[1] + x[1] + du[1];
@@ -341,6 +392,7 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           quads[q + 7] = 0.0f;
           quads[q + 8] = h;
           quads[q + 9] = tile;
+          quads[q + 10] = overlay_tile;
           q += FLOATS_PER_VERTEX;
           quads[q + 0] = base[0] + x[0] + du[0] + dv[0];
           quads[q + 1] = base[1] + x[1] + du[1] + dv[1];
@@ -352,6 +404,7 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           quads[q + 7] = 0.0f;
           quads[q + 8] = 0.0f;
           quads[q + 9] = tile;
+          quads[q + 10] = overlay_tile;
           q += FLOATS_PER_VERTEX;
           quads[q + 0] = base[0] + x[0] + dv[0];
           quads[q + 1] = base[1] + x[1] + dv[1];
@@ -363,6 +416,7 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           quads[q + 7] = w;
           quads[q + 8] = 0.0f;
           quads[q + 9] = tile;
+          quads[q + 10] = overlay_tile;
           section->num_quads += 1;
 
           // Zero out mask

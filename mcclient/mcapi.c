@@ -278,6 +278,7 @@ struct mcapiConnection {
   void (*login_success_cb)(mcapiConnection *, mcapiLoginSuccessPacket);
   void (*finish_config_cb)(mcapiConnection *);
   void (*clientbound_known_packs_cb)(mcapiConnection *, mcapiClientboundKnownPacksPacket);
+  void (*registry_data_cb)(mcapiConnection *, mcapiRegistryDataPacket);
   void (*chunk_and_light_data_cb)(mcapiConnection *, mcapiChunkAndLightDataPacket);
   void (*synchronize_player_position_cb)(mcapiConnection *, mcapiSynchronizePlayerPositionPacket);
 
@@ -730,7 +731,7 @@ mcapiString read_string(ReadableBuffer *io) {
     .ptr = io->buf.ptr + io->cursor,
   };
 
-  printf("rs: len=%ld, cursor=%d, slen=%d\n", io->buf.len, io->cursor, len);
+  // printf("rs: len=%ld, cursor=%d, slen=%d\n", io->buf.len, io->cursor, len);
   io->cursor += len;
 
   return res;
@@ -930,6 +931,23 @@ mcapiNBT *read_nbt(ReadableBuffer *p) {
   return nbt;
 }
 
+mcapiNBT* mcapi_nbt_get_compound_tag(mcapiNBT* nbt, char* name) {
+  if (nbt->type != MCAPI_NBT_COMPOUND) {
+    return NULL;
+  }
+  for (int i = 0; i < nbt->compound_value.count; i++) {
+    // mcapi_print_str(nbt->compound_value.children[i].name);
+    // printf("\n");
+    if (nbt->compound_value.children[i].name.len == 0) {
+      continue;
+    }
+    if (strncmp(nbt->compound_value.children[i].name.ptr, name, nbt->compound_value.children[i].name.len) == 0) {
+      return nbt->compound_value.children + i;
+    }
+  }
+  return NULL;
+}
+
 /* --- Sending Packet Code --- */
 
 void send_packet(mcapiConnection *conn, const mcapiBuffer packet) {
@@ -1089,14 +1107,44 @@ mcapiClientboundKnownPacksPacket create_clientbound_known_packs_packet(ReadableB
 };
 
 void destroy_clientbound_known_packs_packet(mcapiClientboundKnownPacksPacket p) {
+  // for (int i = 0; i < p.known_pack_count; i++) {
+  //   free(p.known_packs[i].namespace.ptr);
+  //   free(p.known_packs[i].id.ptr);
+  //   free(p.known_packs[i].version.ptr);
+  // }
   free(p.known_packs);
+}
+
+mcapiRegistryDataPacket create_registry_data_packet(ReadableBuffer *p) {
+  mcapiRegistryDataPacket res = {0};
+  res.id = read_string(p);
+  res.entry_count = read_varint(p);
+  res.entry_names = malloc(sizeof(mcapiString) * res.entry_count);
+  res.entries = malloc(sizeof(mcapiNBT*) * res.entry_count);
+  for (int i = 0; i < res.entry_count; i++) {
+    res.entry_names[i] = read_string(p);
+    bool present = read_byte(p);
+    if (present) {
+      res.entries[i] = read_nbt(p);
+    }
+  }
+  return res;
+};
+
+void destroy_registry_data_packet(mcapiRegistryDataPacket p) {
+  for (int i = 0; i < p.entry_count; i++) {
+    // free(p.entry_names[i].ptr);
+    // TODO: Implement destrying NBT
+    // destroy_nbt(p.entries[i]);
+  }
+  free(p.entry_names);
+  free(p.entries);
 }
 
 mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *p) {
   mcapiChunkAndLightDataPacket res = {};
   res.chunk_x = read_int(p);
   res.chunk_z = read_int(p);
-  printf("Chunk x=%d z=%d\n", res.chunk_x, res.chunk_z);
   res.heightmaps = read_nbt(p);
   int data_len = read_varint(p);
 
@@ -1197,6 +1245,7 @@ mcapiSynchronizePlayerPositionPacket create_synchronize_player_position_data_pac
 mcapi_setcb_func(login_success, mcapiLoginSuccessPacket);
 mcapi_setcb_func1(finish_config);
 mcapi_setcb_func(clientbound_known_packs, mcapiClientboundKnownPacksPacket);
+mcapi_setcb_func(registry_data, mcapiRegistryDataPacket);
 mcapi_setcb_func(chunk_and_light_data, mcapiChunkAndLightDataPacket);
 mcapi_setcb_func(synchronize_player_position, mcapiSynchronizePlayerPositionPacket);
 
@@ -1295,6 +1344,11 @@ void mcapi_poll(mcapiConnection *conn) {
               mcapiClientboundKnownPacksPacket packet = create_clientbound_known_packs_packet(&curr_packet);
               if (conn->clientbound_known_packs_cb) (*conn->clientbound_known_packs_cb)(conn, packet);
               destroy_clientbound_known_packs_packet(packet);
+              break;
+            case REGISTRY_DATA:
+              mcapiRegistryDataPacket registry_data_packet = create_registry_data_packet(&curr_packet);
+              if (conn->registry_data_cb) (*conn->registry_data_cb)(conn, registry_data_packet);
+              destroy_registry_data_packet(registry_data_packet);
               break;
             default:
               printf("Unknown config packet %02x (len %ld)\n", type, curr_packet.buf.len);

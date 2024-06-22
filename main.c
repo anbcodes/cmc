@@ -25,6 +25,7 @@
 
 #define LOG_PREFIX "[triangle]"
 #define MAX_BLOCKS 65536
+#define MAX_BIOMES 128
 
 #define TEXTURE_SIZE 16
 // There are 899 textures in 1.20.6 - Should fit in 32*32 = 1024 sheet
@@ -49,6 +50,7 @@ typedef struct Game {
   bool mouse_captured;
   vec2 last_mouse;
   BlockInfo block_info[MAX_BLOCKS];
+  BiomeInfo biome_info[MAX_BIOMES];
   float elevation;
   float movement_speed;
   bool on_ground;
@@ -255,12 +257,12 @@ static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int act
       if (material != 0) {
         switch (button) {
           case GLFW_MOUSE_BUTTON_LEFT:
-            world_set_block(&game->world, target, 0, game->block_info, game->device);
+            world_set_block(&game->world, target, 0, game->block_info, game->biome_info, game->device);
             break;
           case GLFW_MOUSE_BUTTON_RIGHT:
             vec3 air_position;
             glm_vec3_add(target, normal, air_position);
-            world_set_block(&game->world, air_position, 1, game->block_info, game->device);
+            world_set_block(&game->world, air_position, 1, game->block_info, game->biome_info, game->device);
             break;
         }
       }
@@ -473,6 +475,67 @@ void on_known_packs(mcapiConnection *conn, mcapiClientboundKnownPacksPacket pack
   mcapi_send_serverbound_known_packs(conn, (mcapiServerboundKnownPacksPacket){});
 }
 
+void int_to_rgb(int color, vec3 result) {
+  glm_vec3_copy(
+    (vec3){
+      (float)((color >> 16) & 0xff) / 255.0f,
+      (float)((color >> 8) & 0xff) / 255.0f,
+      (float)(color & 0xff) / 255.0f,
+    },
+    result
+  );
+}
+
+void on_registry(mcapiConnection *conn, mcapiRegistryDataPacket packet) {
+  if (strncmp(packet.id.ptr, "minecraft:worldgen/biome", packet.id.len) == 0) {
+    unsigned int width;
+    unsigned int height;
+    unsigned char *grass = load_image("data/assets/minecraft/textures/colormap/grass.png", &width, &height);
+    assert(width == 256);
+    assert(height == 256);
+    unsigned char *foliage = load_image("data/assets/minecraft/textures/colormap/foliage.png", &width, &height);
+    assert(width == 256);
+    assert(height == 256);
+    for (int i = 0; i < packet.entry_count; i++) {
+      BiomeInfo info = {0};
+      info.temperature = mcapi_nbt_get_compound_tag(packet.entries[i], "temperature")->float_value;
+      info.downfall = mcapi_nbt_get_compound_tag(packet.entries[i], "downfall")->float_value;
+      mcapiNBT *effects = mcapi_nbt_get_compound_tag(packet.entries[i], "effects");
+      int_to_rgb(mcapi_nbt_get_compound_tag(effects, "fog_color")->int_value, info.fog_color);
+      int_to_rgb(mcapi_nbt_get_compound_tag(effects, "water_color")->int_value, info.water_color);
+      int_to_rgb(mcapi_nbt_get_compound_tag(effects, "water_fog_color")->int_value, info.water_fog_color);
+      int_to_rgb(mcapi_nbt_get_compound_tag(effects, "sky_color")->int_value, info.sky_color);
+
+      float clamped_temperature = glm_clamp(info.temperature, 0.0f, 1.0f);
+      float clamped_downfall = glm_clamp(info.downfall, 0.0f, 1.0f);
+      clamped_downfall *= clamped_temperature;
+      int x_index = 255 - (int)(clamped_temperature * 255);
+      int y_index = 255 - (int)(clamped_downfall * 255);
+      int index = y_index * 256 + x_index;
+      mcapiNBT *grass_color = mcapi_nbt_get_compound_tag(effects, "grass_color");
+      if (grass_color != NULL) {
+        info.custom_grass_color = true;
+        int_to_rgb(grass_color->int_value, info.grass_color);
+      } else {
+        info.grass_color[0] = grass[index * 4 + 0] / 255.0f;
+        info.grass_color[1] = grass[index * 4 + 1] / 255.0f;
+        info.grass_color[2] = grass[index * 4 + 2] / 255.0f;
+      }
+      mcapiNBT *foliage_color = mcapi_nbt_get_compound_tag(effects, "foliage_color");
+      if (foliage_color != NULL) {
+        info.custom_foliage_color = true;
+        int_to_rgb(foliage_color->int_value, info.foliage_color);
+      } else {
+        info.foliage_color[0] = foliage[index * 4 + 0] / 255.0f;
+        info.foliage_color[1] = foliage[index * 4 + 1] / 255.0f;
+        info.foliage_color[2] = foliage[index * 4 + 2] / 255.0f;
+      }
+      game.biome_info[i] = info;
+      printf("Biome %d: %d, %f %f %f\n", i, info.custom_grass_color, info.grass_color[0], info.grass_color[1], info.grass_color[2]);
+    }
+  }
+}
+
 void on_finish_config(mcapiConnection *conn) {
   mcapi_send_acknowledge_finish_config(conn);
 
@@ -490,13 +553,10 @@ void on_chunk(mcapiConnection *conn, mcapiChunkAndLightDataPacket packet) {
     chunk->sections[i].y = i - 4;
     chunk->sections[i].z = packet.chunk_z;
     memcpy(chunk->sections[i].data, packet.chunk_sections[i].blocks, 4096 * sizeof(int));
-    for (int b = 0; b < 64; b += 1) {
-      printf("%d ", packet.chunk_sections[i].biomes[b]);
-    }
-    printf("\n");
+    memcpy(chunk->sections[i].biome_data, packet.chunk_sections[i].biomes, 64 * sizeof(int));
   }
   world_add_chunk(&game.world, chunk);
-  world_init_new_meshes(&game.world, game.block_info, game.device);
+  world_init_new_meshes(&game.world, game.block_info, game.biome_info, game.device);
 }
 
 void on_position(mcapiConnection *conn, mcapiSynchronizePlayerPositionPacket packet) {
@@ -521,10 +581,10 @@ int add_texture(cJSON *textures, const char *name, unsigned char *texture_sheet,
   unsigned int width, height;
   unsigned char *rgba = load_image(fname, &width, &height);
   if (rgba == NULL) {
-    printf("%s not found for %s\n", name, texture_name);
+    // printf("%s not found for %s\n", name, texture_name);
     return 0;
-  } else {
-    printf("%s found for %s, %d\n", name, texture_name, *cur_texture);
+    // } else {
+    //   printf("%s found for %s, %d\n", name, texture_name, *cur_texture);
   }
   int texture_id = *cur_texture;
   *cur_texture += 1;
@@ -583,6 +643,7 @@ int main(int argc, char *argv[]) {
   mcapi_set_finish_config_cb(conn, on_finish_config);
   mcapi_set_chunk_and_light_data_cb(conn, on_chunk);
   mcapi_set_synchronize_player_position_cb(conn, on_position);
+  mcapi_set_registry_data_cb(conn, on_registry);
 
   int num_id = 0;
   int max_id = -1;
@@ -602,16 +663,25 @@ int main(int argc, char *argv[]) {
     cJSON *type = cJSON_GetObjectItemCaseSensitive(definition, "type");
     if (
       strcmp(type->valuestring, "minecraft:air") == 0 ||
-      strcmp(type->valuestring, "minecraft:flower") == 0 ||
+      strcmp(type->valuestring, "minecraft:flower") == 0
+    ) {
+      info.passable = true;
+      info.transparent = true;
+    }
+    if (strcmp(type->valuestring, "minecraft:grass") == 0) {
+      info.grass = true;
+    }
+    if (
       strcmp(type->valuestring, "minecraft:tall_grass") == 0 ||
       strcmp(type->valuestring, "minecraft:double_plant") == 0
     ) {
       info.passable = true;
       info.transparent = true;
+      info.grass = true;
     }
     if (strcmp(type->valuestring, "minecraft:leaves") == 0) {
-      info.passable = false;
       info.transparent = true;
+      info.foliage = true;
     }
 
     snprintf(fname, 1000, "data/assets/minecraft/models/block/%s.json", block_name);
@@ -997,6 +1067,11 @@ int main(int argc, char *argv[]) {
       .offset = 12 + 16 + 8,
       .shaderLocation = 3,
     },
+    {
+      .format = WGPUVertexFormat_Float32,
+      .offset = 12 + 16 + 8 + 4,
+      .shaderLocation = 4,
+    },
   };
 
   // Create a sample world
@@ -1235,6 +1310,9 @@ int main(int argc, char *argv[]) {
     );
     assert(command_encoder);
 
+    vec3 sky_color;
+    world_get_sky_color(&game.world, game.position, game.biome_info, sky_color);
+
     WGPURenderPassEncoder render_pass_encoder =
       wgpuCommandEncoderBeginRenderPass(
         command_encoder,
@@ -1248,9 +1326,9 @@ int main(int argc, char *argv[]) {
               .storeOp = WGPUStoreOp_Store,
               //  .depthSlice = WGPU_DEPTH_SLICE_UNDEFINED,
               .clearValue = (const WGPUColor){
-                .r = 0.0,
-                .g = 0.0,
-                .b = 0.0,
+                .r = sky_color[0],
+                .g = sky_color[1],
+                .b = sky_color[2],
                 .a = 1.0,
               },
             },

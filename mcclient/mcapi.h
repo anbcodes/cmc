@@ -80,6 +80,8 @@ typedef struct mcapiNBT {
   };
 } mcapiNBT;
 
+mcapiNBT* mcapi_nbt_get_compound_tag(mcapiNBT* nbt, char* name);
+
 typedef struct mcapiHandshakePacket {
   int protocol_version;  // See protocol version numbers https://wiki.vg/Protocol_version_numbers
   mcapiString server_addr;  // Hostname or IP, e.g. localhost or 127.0.0.1, that was used to connect. The
@@ -155,6 +157,15 @@ typedef struct mcapiClientboundKnownPacksPacket {
 
 void mcapi_set_clientbound_known_packs_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiClientboundKnownPacksPacket));
 
+typedef struct mcapiRegistryDataPacket {
+  mcapiString id;
+  int entry_count;
+  mcapiString *entry_names;
+  mcapiNBT **entries;
+} mcapiRegistryDataPacket;
+
+void mcapi_set_registry_data_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiRegistryDataPacket));
+
 typedef struct mcapiBitSet {
   int length;
   uint64_t data;
@@ -189,8 +200,10 @@ typedef struct mcapiChunkAndLightDataPacket {
   int sky_light_array_count;
   uint8_t **sky_light_array;
   int block_light_array_count;
-  uint8_t **block_light_array;  
+  uint8_t **block_light_array;
 } mcapiChunkAndLightDataPacket;
+
+void mcapi_set_chunk_and_light_data_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiChunkAndLightDataPacket));
 
 typedef struct mcapiSynchronizePlayerPositionPacket {
   double x;
@@ -202,7 +215,6 @@ typedef struct mcapiSynchronizePlayerPositionPacket {
   int teleport_id;
 } mcapiSynchronizePlayerPositionPacket;
 
-void mcapi_set_chunk_and_light_data_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiChunkAndLightDataPacket));
 void mcapi_set_synchronize_player_position_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiSynchronizePlayerPositionPacket));
 
 void mcapi_poll(mcapiConnection* conn);
