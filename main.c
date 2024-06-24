@@ -34,7 +34,7 @@
 
 const float COLLISION_EPSILON = 0.001f;
 const float TURN_SPEED = 0.002f;
-const float TICKS_PER_SECOND = 60.0f;
+const float TICKS_PER_SECOND = 20.0f;
 
 typedef struct Game {
   WGPUInstance instance;
@@ -53,8 +53,10 @@ typedef struct Game {
   BiomeInfo biome_info[MAX_BIOMES];
   float elevation;
   float movement_speed;
+  float fall_speed;
   bool on_ground;
   vec3 position;
+  vec3 last_movement;
   vec3 velocity;
   vec3 up;
   vec3 forward;
@@ -291,6 +293,7 @@ void game_update_player_y(Game *game, float delta) {
         if (!game->block_info[m].passable) {
           game->position[1] = floor(new_y + sz[1]) - sz[1] - COLLISION_EPSILON;
           game->velocity[1] = 0;
+          game->fall_speed = 0;
           return;
         }
       }
@@ -305,10 +308,14 @@ void game_update_player_y(Game *game, float delta) {
           game->position[1] = ceil(new_y) + COLLISION_EPSILON;
           game->velocity[1] = 0;
           game->on_ground = true;
+          game->fall_speed = 0;
           return;
         }
       }
     }
+  }
+  if (new_y > game->position[1] && game->on_ground) {
+    game->on_ground = false;
   }
   game->position[1] = new_y;
 }
@@ -323,8 +330,8 @@ void game_update_player_x(Game *game, float delta) {
   // Move +x
   if (delta > 0 && floor(new_x + sz[0]) > floor(p[0] + sz[0])) {
     for (int dz = -1; dz <= 1; dz += 2) {
-      for (int dy = 0; dy < sz[1]; dy += 1) {
-        int m = world_get_material(w, (vec3){new_x + sz[0], p[1] + dy, p[2] + dz * sz[2]});
+      for (int dy = 0; dy <= 2; dy += 1) {
+        int m = world_get_material(w, (vec3){new_x + sz[0], p[1] + 0.5f * dy * sz[1], p[2] + dz * sz[2]});
         if (!game->block_info[m].passable) {
           game->position[0] = floor(new_x + sz[0]) - sz[0] - COLLISION_EPSILON;
           game->velocity[0] = 0;
@@ -336,8 +343,8 @@ void game_update_player_x(Game *game, float delta) {
   // Move -x
   if (delta < 0 && floor(new_x - sz[0]) < floor(p[0] - sz[0])) {
     for (int dz = -1; dz <= 1; dz += 2) {
-      for (int dy = 0; dy < sz[1]; dy += 1) {
-        int m = world_get_material(w, (vec3){new_x - sz[0], p[1] + dy, p[2] + dz * sz[2]});
+      for (int dy = 0; dy <= 2; dy += 1) {
+        int m = world_get_material(w, (vec3){new_x - sz[0], p[1] + 0.5f * dy * sz[1], p[2] + dz * sz[2]});
         if (!game->block_info[m].passable) {
           game->position[0] = ceil(new_x - sz[0]) + sz[0] + COLLISION_EPSILON;
           game->velocity[0] = 0;
@@ -359,8 +366,8 @@ void game_update_player_z(Game *game, float delta) {
   // Move +z
   if (delta > 0 && floor(new_z + sz[2]) > floor(p[2] + sz[2])) {
     for (int dx = -1; dx <= 1; dx += 2) {
-      for (int dy = 0; dy < sz[1]; dy += 1) {
-        int m = world_get_material(w, (vec3){p[0] + dx * sz[0], p[1] + dy, new_z + sz[2]});
+      for (int dy = 0; dy <= 2; dy += 1) {
+        int m = world_get_material(w, (vec3){p[0] + dx * sz[0], p[1] + 0.5f * dy * sz[1], new_z + sz[2]});
         if (!game->block_info[m].passable) {
           game->position[2] = floor(new_z + sz[2]) - sz[2] - COLLISION_EPSILON;
           game->velocity[2] = 0;
@@ -372,8 +379,8 @@ void game_update_player_z(Game *game, float delta) {
   // Move -z
   if (delta < 0 && floor(new_z - sz[2]) < floor(p[2] - sz[2])) {
     for (int dx = -1; dx <= 1; dx += 2) {
-      for (int dy = 0; dy < sz[1]; dy += 1) {
-        int m = world_get_material(w, (vec3){p[0] + dx * sz[0], p[1] + dy, new_z - sz[2]});
+      for (int dy = 0; dy <= 2; dy += 1) {
+        int m = world_get_material(w, (vec3){p[0] + dx * sz[0], p[1] + 0.5f * dy * sz[1], new_z - sz[2]});
         if (!game->block_info[m].passable) {
           game->position[2] = ceil(new_z - sz[2]) + sz[2] + COLLISION_EPSILON;
           game->velocity[2] = 0;
@@ -409,32 +416,28 @@ void update_player_position(Game *game, float dt) {
     glm_vec3_sub(desired_velocity, delta, desired_velocity);
   }
   if (game->keys[GLFW_KEY_SPACE]) {
-    vec3 delta;
-    glm_vec3_scale(game->up, speed, delta);
-    glm_vec3_add(desired_velocity, delta, desired_velocity);
+    // vec3 delta;
+    // glm_vec3_scale(game->up, speed, delta);
+    // glm_vec3_add(desired_velocity, delta, desired_velocity);
+    if (game->on_ground) {
+      game->fall_speed = 0.42f * TICKS_PER_SECOND;
+      game->on_ground = false;
+    }
   }
-  if (game->keys[GLFW_KEY_LEFT_SHIFT]) {
-    vec3 delta;
-    glm_vec3_scale(game->up, speed, delta);
-    glm_vec3_sub(desired_velocity, delta, desired_velocity);
-  }
-  glm_vec3_mix(game->velocity, desired_velocity, 0.2f, game->velocity);
-  //   // If there's gravity, we want to keep the up_ component of the velocity but
-  //   // slow down the forward_ component
-  //   glm::vec3 up_component = glm::dot(player_gaussian_.velocity, up_) * up_;
-  //   glm::vec3 forward_component =
-  //       glm::dot(player_gaussian_.velocity, forward_) * forward_;
-  //   player_gaussian_.velocity =
-  //       up_component + 0.8f * desired_velocity + 0.2f * forward_component;
+  // if (game->keys[GLFW_KEY_LEFT_SHIFT]) {
+  //   vec3 delta;
+  //   glm_vec3_scale(game->up, speed, delta);
+  //   glm_vec3_sub(desired_velocity, delta, desired_velocity);
+  // }
+  desired_velocity[1] += game->fall_speed;
+  glm_vec3_mix(game->velocity, desired_velocity, 0.8f, game->velocity);
 
   // Update position
   vec3 delta;
   glm_vec3_scale(game->velocity, dt, delta);
 
-  vec3 p;
-  glm_vec3_copy(game->position, p);
-  vec3 np;
-  glm_vec3_add(game->position, delta, np);
+  vec3 old_position;
+  glm_vec3_copy(game->position, old_position);
 
   game_update_player_y(game, delta[1]);
   if (abs(delta[0]) > abs(delta[2])) {
@@ -445,12 +448,12 @@ void update_player_position(Game *game, float dt) {
     game_update_player_x(game, delta[0]);
   }
 
-  // // Gravity
-  // if (play_mode_ == PlayMode::kNormal) {
-  //   player_gaussian_.velocity += gravity_ * dt * up_;
-  // }
+  glm_vec3_sub(game->position, old_position, game->last_movement);
 
-  // CollidePlayer(player_gaussian_, player_eye_height_, gaussians_);
+  game->fall_speed -= 0.08f * TICKS_PER_SECOND;
+  if (game->fall_speed < 0.0f) {
+    game->fall_speed *= 0.98f;
+  }
 }
 
 void on_login_success(mcapiConnection *conn, mcapiLoginSuccessPacket packet) {
@@ -531,8 +534,13 @@ void on_registry(mcapiConnection *conn, mcapiRegistryDataPacket packet) {
         info.foliage_color[2] = foliage[index * 4 + 2] / 255.0f;
       }
       game.biome_info[i] = info;
-      printf("Biome %d: %d, %f %f %f\n", i, info.custom_grass_color, info.grass_color[0], info.grass_color[1], info.grass_color[2]);
+      // mcapi_print_str(packet.entry_names[i]);
+      // printf(" %d: %d, temp %f downfall %f x %d y %d color %f %f %f\n", i, info.custom_grass_color, info.temperature, info.downfall, x_index, y_index, info.grass_color[0], info.grass_color[1], info.grass_color[2]);
+      // printf("grass %x %x %x\n", grass[index * 4 + 0], grass[index * 4 + 1], grass[index * 4 + 2]);
+      // printf("foliage %x %x %x\n", foliage[index * 4 + 0], foliage[index * 4 + 1], foliage[index * 4 + 2]);
     }
+    // free(grass);
+    // free(foliage);
   }
 }
 
@@ -564,6 +572,20 @@ void on_position(mcapiConnection *conn, mcapiSynchronizePlayerPositionPacket pac
   game.position[0] = packet.x;
   game.position[1] = packet.y;
   game.position[2] = packet.z;
+
+  float pitch = packet.pitch * GLM_PIf / 180.0f;
+  float yaw = packet.yaw * GLM_PIf / 180.0f;
+
+  game.elevation = -pitch;
+  game.look[0] = -cos(pitch) * sin(yaw);
+  game.look[1] = -sin(pitch);
+  game.look[2] = cos(pitch) * cos(yaw);
+  glm_normalize(game.look);
+  glm_vec3_cross(game.look, game.up, game.right);
+  glm_normalize(game.right);
+  glm_vec3_cross(game.up, game.right, game.forward);
+  glm_normalize(game.forward);
+
   mcapi_send_confirm_teleportation(conn, (mcapiConfirmTeleportationPacket){teleport_id : packet.teleport_id});
 }
 
@@ -628,7 +650,7 @@ int main(int argc, char *argv[]) {
   mcapi_send_login_start(
     conn,
     (mcapiLoginStartPacket){
-      .username = mcapi_to_string("nfdnskl"),
+      .username = mcapi_to_string("mcapi"),
       .uuid = (mcapiUUID){
         .upper = 0,
         .lower = 0,
@@ -1234,23 +1256,56 @@ int main(int argc, char *argv[]) {
   glfwGetWindowSize(window, &width, &height);
   update_window_size(&game, width, height);
 
-  double lastTime = glfwGetTime();
-  double targetDeltaTime = 1.0 / 60.0;
+  double lastRenderTime = glfwGetTime();
+  double targetRenderTime = 1.0 / 60.0;
+
+  double lastTickTime = glfwGetTime();
+  double targetTickTime = 1.0 / TICKS_PER_SECOND;
 
   while (!glfwWindowShouldClose(window)) {
     mcapi_poll(conn);
+    glfwPollEvents();
 
     double currentTime = glfwGetTime();
-    double deltaTime = currentTime - lastTime;
-    if (deltaTime < targetDeltaTime) {
+
+    double deltaTickTime = currentTime - lastTickTime;
+    if (deltaTickTime >= targetTickTime) {
+      update_player_position(&game, (float)deltaTickTime);
+      lastTickTime = currentTime;
+      if (mcapi_get_state(conn) == MCAPI_STATE_PLAY) {
+        float yaw = -atan2(game.look[0], game.look[2]) / GLM_PIf * 180.0f;
+        if (yaw < 0.0f) {
+          yaw += 360.0f;
+        }
+        float pitch = -game.elevation * 180.0f / GLM_PIf;
+        mcapi_send_set_player_position_and_rotation(
+          conn,
+          (mcapiSetPlayerPositionAndRotationPacket){
+            .x = game.position[0],
+            .y = game.position[1],
+            .z = game.position[2],
+            .yaw = yaw,
+            .pitch = pitch,
+            .on_ground = true,
+          }
+        );
+      }
+    }
+
+    double deltaRenderTime = currentTime - lastRenderTime;
+    if (deltaRenderTime < targetRenderTime) {
       continue;
     }
-    lastTime = currentTime;
+    lastRenderTime = currentTime;
 
-    glfwPollEvents();
-    update_player_position(&game, (float)deltaTime);
+    // vec3 movement;
+    // glm_vec3_scale(game.last_movement, deltaTickTime * TICKS_PER_SECOND, movement);
+    // vec3 position;
+    // glm_vec3_add(game.position, movement, position);
+    // vec3 eye = {position[0], position[1] + game.eye_height, position[2]};
 
     vec3 eye = {game.position[0], game.position[1] + game.eye_height, game.position[2]};
+
     vec3 center;
     glm_vec3_add(eye, game.look, center);
 

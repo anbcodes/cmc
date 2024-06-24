@@ -24,6 +24,7 @@ typedef struct mcapiConnection mcapiConnection;
 
 mcapiConnection* mcapi_create_connection(char* hostname, short port);
 void mcapi_set_state(mcapiConnection* conn, mcapiConnState state);
+mcapiConnState mcapi_get_state(mcapiConnection* conn);
 
 typedef struct mcapiUUID {
   uint64_t upper;
@@ -125,6 +126,17 @@ typedef struct mcapiConfirmTeleportationPacket {
 } mcapiConfirmTeleportationPacket;
 
 void mcapi_send_confirm_teleportation(mcapiConnection* conn, mcapiConfirmTeleportationPacket packet);
+
+typedef struct mcapiSetPlayerPositionAndRotationPacket {
+  double x;
+  double y;
+  double z;
+  float yaw;
+  float pitch;
+  uint8_t on_ground;
+} mcapiSetPlayerPositionAndRotationPacket;
+
+void mcapi_send_set_player_position_and_rotation(mcapiConnection* conn, mcapiSetPlayerPositionAndRotationPacket packet);
 
 // -- Callbacks --
 

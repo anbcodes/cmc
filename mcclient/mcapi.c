@@ -346,6 +346,10 @@ void mcapi_set_state(mcapiConnection *conn, mcapiConnState state) {
   conn->state = state;
 };
 
+mcapiConnState mcapi_get_state(mcapiConnection* conn) {
+  return conn->state;
+}
+
 /* --- Buffer --- */
 
 mcapiBuffer mcapi_create_buffer(size_t len) {
@@ -470,6 +474,32 @@ void write_bytes(WritableBuffer *io, void *src, int len) {
 void write_short(WritableBuffer *io, uint16_t value) {
   write_byte(io, value >> 8);
   write_byte(io, value);
+}
+
+void write_int(WritableBuffer *io, int value) {
+  write_byte(io, value >> (8 * 3));
+  write_byte(io, value >> (8 * 2));
+  write_byte(io, value >> (8 * 1));
+  write_byte(io, value >> (8 * 0));
+}
+
+void write_long(WritableBuffer *io, long value) {
+  write_byte(io, value >> (8 * 7));
+  write_byte(io, value >> (8 * 6));
+  write_byte(io, value >> (8 * 5));
+  write_byte(io, value >> (8 * 4));
+  write_byte(io, value >> (8 * 3));
+  write_byte(io, value >> (8 * 2));
+  write_byte(io, value >> (8 * 1));
+  write_byte(io, value >> (8 * 0));
+}
+
+void write_float(WritableBuffer *io, float value) {
+  write_int(io, *(int *)(&value));
+}
+
+void write_double(WritableBuffer *io, double value) {
+  write_long(io, *(long *)(&value));
 }
 
 // From https://github.com/bolderflight/leb128/blob/main/src/leb128.h
@@ -1044,6 +1074,21 @@ void mcapi_send_confirm_teleportation(mcapiConnection *conn, mcapiConfirmTelepor
 
   write_varint(&reusable_buffer, CONFIRM_TELEPORTATION);
   write_varint(&reusable_buffer, packet.teleport_id);
+
+  send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
+}
+
+void mcapi_send_set_player_position_and_rotation(mcapiConnection *conn, mcapiSetPlayerPositionAndRotationPacket packet) {
+  reusable_buffer.cursor = 0;
+  reusable_buffer.buf.len = 0;
+
+  write_varint(&reusable_buffer, SET_PLAYER_POSITION_AND_ROTATION);
+  write_double(&reusable_buffer, packet.x);
+  write_double(&reusable_buffer, packet.y);
+  write_double(&reusable_buffer, packet.z);
+  write_float(&reusable_buffer, packet.yaw);
+  write_float(&reusable_buffer, packet.pitch);
+  write_byte(&reusable_buffer, packet.on_ground);
 
   send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
 }
