@@ -54,7 +54,7 @@ before
 //  .depthSlice = WGPU_DEPTH_SLICE_UNDEFINED,
 ```
 
-# To figure out which texture keys there are in model files:
+## To figure out which texture keys there are in model files:
 
 ```
 jq -r '.textures | keys[]' block/*.json | sort | uniq -c | sort -nr
