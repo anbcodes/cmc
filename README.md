@@ -5,25 +5,19 @@
 * Follow the build instructions for GLFW https://www.glfw.org/docs/3.3/compile.html
 * From the GLFW build directory, run `cmake --install . --prefix ../../GLFW`
 * From the main directory, run `git clone https://github.com/recp/cglm.git` to get cglm. It works as a header-only library.
+* Retrieve `blocks.json` from the server jar with the following and place it in `/data`.
+
+```
+java -DbundlerMainClass=net.minecraft.data.Main -jar paper-1.20.6-145.jar
+```
+* To load default client resources, copy your client jar from `~/.minecraft/versions`
+to `/data` and extract it with `gunzip 1.20.6.jar`.
+To clean things up you can `rm *.class` as these files are not needed.
 * To compile
 ```
 gcc main.c framework.c chunk.c mcclient/mcapi.c cJSON.c lodepng/lodepng.c wgpu/libwgpu_native.a GLFW/lib/libglfw3.a -lm
 ```
 * This creates the executable `a.out`
-
-## Setup needed from Minecraft
-
-To retrieve `blocks.json`:
-
-```
-java -DbundlerMainClass=net.minecraft.data.Main -jar paper-1.20.6-145.jar
-```
-
-To figure out which texture keys there are in model files:
-
-```
-jq -r '.textures | keys[]' block/*.json | sort | uniq -c | sort -nr
-```
 
 ## Debugging
 
@@ -58,4 +52,10 @@ before
 * I commented out this line that causes an error (probably a mismatched wgpu version)
 ```
 //  .depthSlice = WGPU_DEPTH_SLICE_UNDEFINED,
+```
+
+# To figure out which texture keys there are in model files:
+
+```
+jq -r '.textures | keys[]' block/*.json | sort | uniq -c | sort -nr
 ```
