@@ -52,11 +52,11 @@ typedef struct Game {
   BlockInfo block_info[MAX_BLOCKS];
   BiomeInfo biome_info[MAX_BIOMES];
   float elevation;
-  float movement_speed;
+  float walking_speed;
   float fall_speed;
   bool on_ground;
   vec3 position;
-  vec3 last_movement;
+  vec3 last_position;
   vec3 velocity;
   vec3 up;
   vec3 forward;
@@ -66,7 +66,7 @@ typedef struct Game {
 } Game;
 
 Game game = {
-  .movement_speed = 0.1f,
+  .walking_speed = 4.317f,
   .position = {0.0f, 20.0f, 0.0f},
   .up = {0.0f, 1.0f, 0.0f},
   .forward = {0.0f, 0.0f, 1.0f},
@@ -394,7 +394,7 @@ void game_update_player_z(Game *game, float delta) {
 
 void update_player_position(Game *game, float dt) {
   vec3 desired_velocity = {0};
-  float speed = game->movement_speed * TICKS_PER_SECOND;
+  float speed = game->walking_speed;
   if (game->keys[GLFW_KEY_D]) {
     vec3 delta;
     glm_vec3_scale(game->right, speed, delta);
@@ -436,8 +436,7 @@ void update_player_position(Game *game, float dt) {
   vec3 delta;
   glm_vec3_scale(game->velocity, dt, delta);
 
-  vec3 old_position;
-  glm_vec3_copy(game->position, old_position);
+  glm_vec3_copy(game->position, game->last_position);
 
   game_update_player_y(game, delta[1]);
   if (abs(delta[0]) > abs(delta[2])) {
@@ -447,8 +446,6 @@ void update_player_position(Game *game, float dt) {
     game_update_player_z(game, delta[2]);
     game_update_player_x(game, delta[0]);
   }
-
-  glm_vec3_sub(game->position, old_position, game->last_movement);
 
   game->fall_speed -= 0.08f * TICKS_PER_SECOND;
   if (game->fall_speed < 0.0f) {
@@ -1270,7 +1267,9 @@ int main(int argc, char *argv[]) {
 
     double deltaTickTime = currentTime - lastTickTime;
     if (deltaTickTime >= targetTickTime) {
-      update_player_position(&game, (float)deltaTickTime);
+      // update_player_position(&game, (float)deltaTickTime);
+      // Force the update to be one tick
+      update_player_position(&game, (float)(1.0 / TICKS_PER_SECOND));
       lastTickTime = currentTime;
       if (mcapi_get_state(conn) == MCAPI_STATE_PLAY) {
         float yaw = -atan2(game.look[0], game.look[2]) / GLM_PIf * 180.0f;
@@ -1304,7 +1303,13 @@ int main(int argc, char *argv[]) {
     // glm_vec3_add(game.position, movement, position);
     // vec3 eye = {position[0], position[1] + game.eye_height, position[2]};
 
-    vec3 eye = {game.position[0], game.position[1] + game.eye_height, game.position[2]};
+    // Interpolate between last and current position for smooth movement
+    vec3 position;
+    glm_vec3_lerp(game.last_position, game.position, (currentTime - lastTickTime) * TICKS_PER_SECOND, position);
+    vec3 eye = {position[0], position[1] + game.eye_height, position[2]};
+
+    // No interpolation
+    // vec3 eye = {game.position[0], game.position[1] + game.eye_height, game.position[2]};
 
     vec3 center;
     glm_vec3_add(eye, game.look, center);
