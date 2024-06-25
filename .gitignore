@@ -6,3 +6,5 @@ cglm
 data
 core
 texture_sheet.png
+cmc
+.cache

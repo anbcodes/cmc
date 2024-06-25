@@ -627,19 +627,32 @@ int add_texture(cJSON *textures, const char *name, unsigned char *texture_sheet,
 }
 
 int main(int argc, char *argv[]) {
-  UNUSED(argc)
-  UNUSED(argv)
+  if (argc < 4) {
+    perror("Usage: cmc [username] [server ip] [port]\n");
+    exit(1);
+  }
+
+  char *username = argv[1];
+  char *server_ip = argv[2];
+  long long _port = strtol(argv[3], NULL, 10);
+
+  if (_port < 1 || _port > 65535) {
+    perror("Invalid port. Must be between 1 and 65535\n");
+    exit(1);
+  }
+
+  unsigned short port = _port;
 
   frmwrk_setup_logging(WGPULogLevel_Warn);
 
-  mcapiConnection *conn = mcapi_create_connection("0.0.0.0", 25565);
+  mcapiConnection *conn = mcapi_create_connection(server_ip, port);
 
   mcapi_send_handshake(
     conn,
     (mcapiHandshakePacket){
       .protocol_version = 766,
-      .server_addr = "127.0.0.1",
-      .server_port = 25565,
+      .server_addr = server_ip,
+      .server_port = port,
       .next_state = 2,
     }
   );
@@ -647,7 +660,7 @@ int main(int argc, char *argv[]) {
   mcapi_send_login_start(
     conn,
     (mcapiLoginStartPacket){
-      .username = mcapi_to_string("mcapi"),
+      .username = mcapi_to_string(username),
       .uuid = (mcapiUUID){
         .upper = 0,
         .lower = 0,
