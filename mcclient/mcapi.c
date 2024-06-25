@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../cglm/include/cglm/cglm.h"
 #include "sockets.h"
 
 #define ntohll(x) (((uint64_t)ntohl((x) & 0xFFFFFFFF) << 32) | ntohl((x) >> 32))
@@ -346,7 +347,7 @@ void mcapi_set_state(mcapiConnection *conn, mcapiConnState state) {
   conn->state = state;
 };
 
-mcapiConnState mcapi_get_state(mcapiConnection* conn) {
+mcapiConnState mcapi_get_state(mcapiConnection *conn) {
   return conn->state;
 }
 
@@ -494,6 +495,17 @@ void write_long(WritableBuffer *io, long value) {
   write_byte(io, value >> (8 * 0));
 }
 
+void write_ulong(WritableBuffer *io, uint64_t value) {
+  write_byte(io, value >> (8 * 7));
+  write_byte(io, value >> (8 * 6));
+  write_byte(io, value >> (8 * 5));
+  write_byte(io, value >> (8 * 4));
+  write_byte(io, value >> (8 * 3));
+  write_byte(io, value >> (8 * 2));
+  write_byte(io, value >> (8 * 1));
+  write_byte(io, value >> (8 * 0));
+}
+
 void write_float(WritableBuffer *io, float value) {
   write_int(io, *(int *)(&value));
 }
@@ -579,6 +591,11 @@ void write_uuid(WritableBuffer *io, mcapiUUID uuid) {
   write_byte(io, uuid.lower >> (8 * 0));
 }
 
+void write_ipos(WritableBuffer *io, ivec3 pos) {
+  uint64_t packed = (((int64_t)pos[0] & 0x3FFFFFF) << 38) | (((int64_t)pos[2] & 0x3FFFFFF) << 12) | ((int64_t)pos[1] & 0xFFF);
+
+  write_ulong(io, packed);
+}
 // Does not do bounds checking
 uint8_t read_byte(ReadableBuffer *io) {
   // printf("rb: len=%d, cursor=%d\n", io->buf.len, io->cursor);
@@ -961,7 +978,7 @@ mcapiNBT *read_nbt(ReadableBuffer *p) {
   return nbt;
 }
 
-mcapiNBT* mcapi_nbt_get_compound_tag(mcapiNBT* nbt, char* name) {
+mcapiNBT *mcapi_nbt_get_compound_tag(mcapiNBT *nbt, char *name) {
   if (nbt->type != MCAPI_NBT_COMPOUND) {
     return NULL;
   }
@@ -1093,6 +1110,19 @@ void mcapi_send_set_player_position_and_rotation(mcapiConnection *conn, mcapiSet
   send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
 }
 
+void mcapi_send_player_action(mcapiConnection *conn, mcapiPlayerActionPacket packet) {
+  reusable_buffer.cursor = 0;
+  reusable_buffer.buf.len = 0;
+
+  write_varint(&reusable_buffer, PLAYER_ACTION);
+  write_varint(&reusable_buffer, packet.status);
+  write_ipos(&reusable_buffer, packet.position);
+  write_byte(&reusable_buffer, packet.face);
+  write_varint(&reusable_buffer, packet.sequence_num);
+
+  send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
+};
+
 // Reading packets
 
 // Enables compression. If compression is enabled, all following packets are encoded in the
@@ -1165,7 +1195,7 @@ mcapiRegistryDataPacket create_registry_data_packet(ReadableBuffer *p) {
   res.id = read_string(p);
   res.entry_count = read_varint(p);
   res.entry_names = malloc(sizeof(mcapiString) * res.entry_count);
-  res.entries = malloc(sizeof(mcapiNBT*) * res.entry_count);
+  res.entries = malloc(sizeof(mcapiNBT *) * res.entry_count);
   for (int i = 0; i < res.entry_count; i++) {
     res.entry_names[i] = read_string(p);
     bool present = read_byte(p);

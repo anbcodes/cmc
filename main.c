@@ -63,6 +63,7 @@ typedef struct Game {
   vec3 right;
   vec3 look;
   World world;
+  mcapiConnection *conn;
 } Game;
 
 Game game = {
@@ -239,6 +240,7 @@ static void handle_glfw_cursor_pos(GLFWwindow *window, double xpos, double ypos)
 }
 
 static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int action, int mods) {
+  static int seq_num = 12;
   UNUSED(mods)
   Game *game = glfwGetWindowUserPointer(window);
   if (!game) return;
@@ -260,6 +262,13 @@ static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int act
         switch (button) {
           case GLFW_MOUSE_BUTTON_LEFT:
             world_set_block(&game->world, target, 0, game->block_info, game->biome_info, game->device);
+            mcapi_send_player_action(game->conn, (mcapiPlayerActionPacket){
+                                                   .face = MCAPI_FACE_EAST,
+                                                   .position = {target[0], target[1], target[2]},
+                                                   .status = MCAPI_ACTION_DIG_START,
+                                                   .sequence_num = seq_num,
+                                                 });
+            seq_num++;
             break;
           case GLFW_MOUSE_BUTTON_RIGHT:
             vec3 air_position;
@@ -646,6 +655,7 @@ int main(int argc, char *argv[]) {
   frmwrk_setup_logging(WGPULogLevel_Warn);
 
   mcapiConnection *conn = mcapi_create_connection(server_ip, port);
+  game.conn = conn;
 
   mcapi_send_handshake(
     conn,
