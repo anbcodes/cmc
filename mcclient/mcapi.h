@@ -215,7 +215,7 @@ void mcapi_set_registry_data_cb(mcapiConnection* conn, void (*cb)(mcapiConnectio
 
 typedef struct mcapiBitSet {
   int length;
-  uint64_t data;
+  uint64_t *data;
 } mcapiBitSet;
 
 typedef struct mcapiBlockEntity {
@@ -223,7 +223,7 @@ typedef struct mcapiBlockEntity {
   uint8_t z;
   short y;
   int type;
-  mcapiNBT data;
+  mcapiNBT *data;
 } mcapiBlockEntity;
 
 typedef struct mcapiChunkSection {
@@ -240,14 +240,8 @@ typedef struct mcapiChunkAndLightDataPacket {
   mcapiChunkSection* chunk_sections;
   int block_entity_count;
   mcapiBlockEntity* block_entities;
-  mcapiBitSet sky_light_mask;
-  mcapiBitSet block_light_mask;
-  mcapiBitSet empty_sky_light_mask;
-  mcapiBitSet empty_block_light_mask;
-  int sky_light_array_count;
-  uint8_t** sky_light_array;
-  int block_light_array_count;
-  uint8_t** block_light_array;
+  uint8_t sky_light_array[26][4096];
+  uint8_t block_light_array[26][4096];
 } mcapiChunkAndLightDataPacket;
 
 void mcapi_set_chunk_and_light_data_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiChunkAndLightDataPacket));

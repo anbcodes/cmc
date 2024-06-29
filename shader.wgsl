@@ -20,6 +20,9 @@ struct Vertex {
   @location(2) coord: vec2<f32>,
   @location(3) material: f32,
   @location(4) overlay_material: f32,
+  @location(5) sky_light: f32,
+  @location(6) block_light: f32,
+  @location(7) normal: f32,
 };
 
 struct VertexOutput {
@@ -28,6 +31,9 @@ struct VertexOutput {
   @location(1) coord: vec2<f32>,
   @location(2) patchCoord: vec2<f32>,
   @location(3) patchOverlayCoord: vec2<f32>,
+  @location(4) sky_light: f32,
+  @location(5) block_light: f32,
+  @location(6) normal: f32,
 }
 
 @vertex
@@ -43,6 +49,9 @@ fn vs_main(vertex: Vertex) -> VertexOutput {
   out.coord = vertex.coord;
   out.patchCoord = patchSize * patchIndex;
   out.patchOverlayCoord = patchSize * patchOverlayIndex;
+  out.sky_light = vertex.sky_light;
+  out.block_light = vertex.block_light;
+  out.normal = vertex.normal;
   return out;
 }
 
@@ -65,5 +74,8 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
   if (color.a == 0.0f) {
     discard;
   }
+  // -z, -y, -x, 0, +x, +y, +z
+  var normal_multipliers: array<f32, 7> = array<f32, 7>(0.5, 0.3, 0.3, 0.0, 0.3, 0.7, 0.5);
+  color = vec4<f32>(color.rgb * normal_multipliers[u32(vertex.normal + 3.0f)] * clamp(pow(vertex.sky_light, 3.0) + 0.1, 0.0, 1.0), color.a);
   return color;
 }

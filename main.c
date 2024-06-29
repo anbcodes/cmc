@@ -568,6 +568,8 @@ void on_chunk(mcapiConnection *conn, mcapiChunkAndLightDataPacket packet) {
     chunk->sections[i].z = packet.chunk_z;
     memcpy(chunk->sections[i].data, packet.chunk_sections[i].blocks, 4096 * sizeof(int));
     memcpy(chunk->sections[i].biome_data, packet.chunk_sections[i].biomes, 64 * sizeof(int));
+    memcpy(chunk->sections[i].sky_light, packet.sky_light_array[i + 1], 4096);
+    memcpy(chunk->sections[i].block_light, packet.block_light_array[i + 1], 4096);
   }
   world_add_chunk(&game.world, chunk);
   world_init_new_meshes(&game.world, game.block_info, game.biome_info, game.device);
@@ -1113,6 +1115,21 @@ int main(int argc, char *argv[]) {
       .format = WGPUVertexFormat_Float32,
       .offset = 12 + 16 + 8 + 4,
       .shaderLocation = 4,
+    },
+    {
+      .format = WGPUVertexFormat_Float32,
+      .offset = 12 + 16 + 8 + 4 + 4,
+      .shaderLocation = 5,
+    },
+    {
+      .format = WGPUVertexFormat_Float32,
+      .offset = 12 + 16 + 8 + 4 + 4 + 4,
+      .shaderLocation = 6,
+    },
+    {
+      .format = WGPUVertexFormat_Float32,
+      .offset = 12 + 16 + 8 + 4 + 4 + 4 + 4,
+      .shaderLocation = 7,
     },
   };
 

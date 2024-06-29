@@ -605,7 +605,6 @@ uint8_t read_byte(ReadableBuffer *io) {
 }
 
 mcapiBuffer read_bytes(ReadableBuffer *io, size_t size) {
-  printf("rbs: len=%ld, cursor=%d, count=%ld\n", io->buf.len, io->cursor, size);
   mcapiBuffer buf = {
     .ptr = io->buf.ptr + io->cursor,
     .len = size,
@@ -715,6 +714,25 @@ int read_varint(ReadableBuffer *io) {
   }
 
   return value;
+}
+
+mcapiBitSet read_bitset(ReadableBuffer *io) {
+  mcapiBitSet bitset = {0};
+  bitset.length = read_varint(io);
+  bitset.data = malloc(sizeof(uint64_t) * bitset.length);
+  for (int i = 0; i < bitset.length; i++) {
+    bitset.data[i] = read_ulong(io);
+  }
+  return bitset;
+}
+
+bool bitset_at(mcapiBitSet bitset, int index) {
+  int word = index / 64;
+  if (word >= bitset.length) {
+    return false;  // Out of bounds (false by default)
+  }
+  int bit = index % 64;
+  return (bitset.data[word] & (1 << bit)) != 0;
 }
 
 bool has_varint(ReadableBuffer io) {
@@ -1291,6 +1309,66 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
       }
     }
   }
+
+  // Block entities
+
+  res.block_entity_count = read_varint(p);
+  res.block_entities = malloc(sizeof(mcapiBlockEntity) * res.block_entity_count);
+  for (int i = 0; i < res.block_entity_count; i++) {
+    uint8_t xz = read_byte(p);
+    res.block_entities[i].x = xz >> 4;
+    res.block_entities[i].z = xz & 0x0F;
+    res.block_entities[i].y = read_short(p);
+    res.block_entities[i].type = read_varint(p);
+    res.block_entities[i].data = read_nbt(p);
+  }
+
+  // Sky and block lights
+
+  mcapiBitSet sky_light_mask = read_bitset(p);
+  mcapiBitSet block_light_mask = read_bitset(p);
+  mcapiBitSet empty_sky_light_mask = read_bitset(p);
+  mcapiBitSet empty_block_light_mask = read_bitset(p);
+
+  int sky_light_array_count = read_varint(p);
+  int sky_data_count = 0;
+  for (int i = 0; i < 24 + 2; i++) {
+    if (bitset_at(sky_light_mask, i)) {
+      sky_data_count += 1;
+      int length = read_varint(p);
+      assert(length == 2048);
+      mcapiBuffer buffer = read_bytes(p, length);
+      // Expand from half-bytes to full-bytes for convenience to the client
+      for (int ind = 0; ind < 4096; ind += 1) {
+        res.sky_light_array[i][ind] = buffer.ptr[ind / 2] >> (4 * (ind % 2)) & 0x0F;
+      }
+    } else if (bitset_at(empty_sky_light_mask, i)) {
+      memset(res.sky_light_array[i], 0x0, 4096);
+    } else {
+      memset(res.sky_light_array[i], 0xf, 4096);
+    }
+  }
+  assert(sky_data_count == sky_light_array_count);
+
+  int block_light_array_count = read_varint(p);
+  int block_data_count = 0;
+  for (int i = 0; i < 24 + 2; i++) {
+    if (bitset_at(block_light_mask, i)) {
+      block_data_count += 1;
+      int length = read_varint(p);
+      assert(length == 2048);
+      mcapiBuffer buffer = read_bytes(p, length);
+      // Expand from half-bytes to full-bytes for convenience to the client
+      for (int ind = 0; ind < 4096; ind += 1) {
+        res.block_light_array[i][ind] = buffer.ptr[ind / 2] >> (4 * (ind % 2)) & 0x0F;
+      }
+    } else if (bitset_at(empty_block_light_mask, i)) {
+      memset(res.block_light_array[i], 0x0, 4096);
+    } else {
+      memset(res.block_light_array[i], 0xf, 4096);
+    }
+  }
+  assert(block_data_count == block_light_array_count);
 
   return res;
 }
