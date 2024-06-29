@@ -34,7 +34,11 @@ java -DbundlerMainClass=net.minecraft.data.Main -jar paper-1.20.6-145.jar --repo
 gcc main.c framework.c chunk.c mcclient/mcapi.c cJSON.c lodepng/lodepng.c wgpu/libwgpu_native.a GLFW/lib/libglfw3.a -lm -o cmc
 ```
 
-- This creates the executable `cmc`
+- This creates the executable `cmc`. Run the client with
+
+```
+./cmc aaabbb 127.0.0.1 25565
+```
 
 ## Debugging
 

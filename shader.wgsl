@@ -46,16 +46,21 @@ fn vs_main(vertex: Vertex) -> VertexOutput {
   return out;
 }
 
+fn srgb_to_linear(in: vec4<f32>) -> vec4<f32> {
+  return vec4<f32>(pow(in.rgb, vec3<f32>(2.2)), in.a);
+}
+
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
   var patchCount = vec2<f32>(TEXTURE_TILES, TEXTURE_TILES);
   var patchSize = vec2(1.0 / patchCount.x, 1.0 / patchCount.y);
   var texCoord = vertex.patchCoord + fract(vertex.coord) * patchSize;
   var color = textureSample(image_texture, image_sampler, texCoord);
+  var tint = srgb_to_linear(vertex.color);
   if (vertex.patchOverlayCoord.x == 0.0f && vertex.patchOverlayCoord.y == 0.0f) {
-    color *= vertex.color;
+    color *= tint;
   }
-  var overlayColor = textureSample(image_texture, image_sampler, vertex.patchOverlayCoord + fract(vertex.coord) * patchSize) * vertex.color;
+  var overlayColor = textureSample(image_texture, image_sampler, vertex.patchOverlayCoord + fract(vertex.coord) * patchSize) * tint;
   color = mix(color, overlayColor, overlayColor.a);
   if (color.a == 0.0f) {
     discard;

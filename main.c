@@ -1195,6 +1195,8 @@ int main(int argc, char *argv[]) {
   WGPUSurfaceCapabilities surface_capabilities = {0};
   wgpuSurfaceGetCapabilities(game.surface, game.adapter, &surface_capabilities);
 
+  WGPUTextureFormat surface_format = surface_capabilities.formats[0];
+
   WGPURenderPipeline render_pipeline = wgpuDeviceCreateRenderPipeline(
     game.device,
     &(const WGPURenderPipelineDescriptor){
@@ -1220,7 +1222,7 @@ int main(int argc, char *argv[]) {
         .targetCount = 1,
         .targets = (const WGPUColorTargetState[]){
           (const WGPUColorTargetState){
-            .format = surface_capabilities.formats[0],
+            .format = surface_format,
             .writeMask = WGPUColorWriteMask_All,
           },
         },
@@ -1256,7 +1258,7 @@ int main(int argc, char *argv[]) {
   game.config = (const WGPUSurfaceConfiguration){
     .device = game.device,
     .usage = WGPUTextureUsage_RenderAttachment,
-    .format = surface_capabilities.formats[0],
+    .format = surface_format,
     .presentMode = WGPUPresentMode_Fifo,
     .alphaMode = surface_capabilities.alphaModes[0],
   };
