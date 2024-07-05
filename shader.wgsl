@@ -1,6 +1,7 @@
 struct Uniforms {
   view: mat4x4<f32>,
   projection: mat4x4<f32>,
+  internal_sky_max: f32,
 }
 
 const TEXTURE_TILES = 40.0f;
@@ -76,6 +77,8 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
   }
   // -z, -y, -x, 0, +x, +y, +z
   var normal_multipliers: array<f32, 7> = array<f32, 7>(0.5, 0.3, 0.3, 0.0, 0.3, 0.7, 0.5);
-  color = vec4<f32>(color.rgb * normal_multipliers[u32(vertex.normal + 3.0f)] * clamp(pow(vertex.sky_light, 3.0) + 0.1, 0.0, 1.0), color.a);
+
+  var internal_sky_light = uniforms.internal_sky_max - (1.0 - vertex.sky_light);
+  color = vec4<f32>(color.rgb * normal_multipliers[u32(vertex.normal + 3.0f)] * clamp(pow(clamp(internal_sky_light, 0.0, 1.0), 3.0) + 0.1, 0.0, 1.0), color.a);
   return color;
 }

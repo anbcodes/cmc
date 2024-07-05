@@ -258,4 +258,11 @@ typedef struct mcapiSynchronizePlayerPositionPacket {
 
 void mcapi_set_synchronize_player_position_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiSynchronizePlayerPositionPacket));
 
+typedef struct mcapiUpdateTimePacket {
+  long world_age;
+  long time_of_day;
+} mcapiUpdateTimePacket;
+
+void mcapi_set_update_time_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiUpdateTimePacket));
+
 void mcapi_poll(mcapiConnection* conn);

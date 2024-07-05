@@ -62,6 +62,7 @@ typedef struct Game {
   vec3 forward;
   vec3 right;
   vec3 look;
+  long time_of_day;
   World world;
   mcapiConnection *conn;
 } Game;
@@ -77,10 +78,11 @@ Game game = {
   .size = {0.6, 1.8, 0.6},
 };
 
-struct uniforms {
+typedef struct Uniforms {
   mat4 view;
   mat4 projection;
-};
+  float internal_sky_max;
+} Uniforms;
 
 unsigned char *load_image(const char *filename, unsigned *width, unsigned *height) {
   unsigned char *png = 0;
@@ -597,6 +599,11 @@ void on_position(mcapiConnection *conn, mcapiSynchronizePlayerPositionPacket pac
   mcapi_send_confirm_teleportation(conn, (mcapiConfirmTeleportationPacket){teleport_id : packet.teleport_id});
 }
 
+void on_update_time(mcapiConnection *conn, mcapiUpdateTimePacket packet) {
+  printf("World age: %ld, Time of day: %ld\n", packet.world_age, packet.time_of_day % 24000);
+  game.time_of_day = packet.time_of_day;
+}
+
 int add_texture(cJSON *textures, const char *name, unsigned char *texture_sheet, int *cur_texture) {
   char fname[1000];
   cJSON *texture = cJSON_GetObjectItemCaseSensitive(textures, name);
@@ -688,6 +695,7 @@ int main(int argc, char *argv[]) {
   mcapi_set_chunk_and_light_data_cb(conn, on_chunk);
   mcapi_set_synchronize_player_position_cb(conn, on_position);
   mcapi_set_registry_data_cb(conn, on_registry);
+  mcapi_set_update_time_cb(conn, on_update_time);
 
   int num_id = 0;
   int max_id = -1;
@@ -802,10 +810,7 @@ int main(int argc, char *argv[]) {
     }
     block = block->next;
   }
-  printf("max id: %d\n", max_id);
-  printf("num id: %d\n", num_id);
-  printf("num textures: %d\n", cur_texture);
-  save_image("texture_sheet.png", texture_sheet, TEXTURE_SIZE * TEXTURE_TILES, TEXTURE_SIZE * TEXTURE_TILES);
+  // save_image("texture_sheet.png", texture_sheet, TEXTURE_SIZE * TEXTURE_TILES, TEXTURE_SIZE * TEXTURE_TILES);
 
   game.instance = wgpuCreateInstance(NULL);
   assert(game.instance);
@@ -1020,7 +1025,7 @@ int main(int argc, char *argv[]) {
     &copy_size
   );
 
-  struct uniforms uniforms = {
+  Uniforms uniforms = {
     .view = GLM_MAT4_IDENTITY_INIT,
     .projection = GLM_MAT4_IDENTITY_INIT,
   };
@@ -1038,7 +1043,7 @@ int main(int argc, char *argv[]) {
   WGPUBindGroupLayoutEntry bgl_entries[] = {
     [0] = {
       .binding = 0,
-      .visibility = WGPUShaderStage_Vertex,
+      .visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment,
       .buffer = {
         .type = WGPUBufferBindingType_Uniform,
       },
@@ -1366,6 +1371,23 @@ int main(int argc, char *argv[]) {
     );
     memcpy(&uniforms.projection, projection, sizeof(projection));
 
+    // Day: 23,961 - 23,999, 0 - 12,039 is at 15
+    // Dusk: 12,040 - 13,670 goes from light 15 to 4
+    // Night: 13,671 - 22,329 is at 4
+    // Dawn: 22,330 - 23,960 goes from light 4 to 15
+    float sky_max = 15.0f;
+    int time = game.time_of_day % 24000;
+    if (time > 12040 && time < 13670) {
+      sky_max = 4.0f + (15.0f - 4.0f) * (13670.0f - time) / (13670.0f - 12040.0f);
+    } else if (time > 13670 && time < 22330) {
+      sky_max = 4.0f;
+    } else if (time > 22330 && time < 23960) {
+      sky_max = 4.0f + (15.0f - 4.0f) * (time - 22330.0f) / (23960.0f - 22330.0f);
+    }
+
+    uniforms.internal_sky_max = sky_max / 15.0f;
+    float sky_color_scale = pow(glm_clamp((sky_max - 4.0)/11.0, 0.0, 1.0), 3.0);
+
     // Send uniforms to GPU
     wgpuQueueWriteBuffer(queue, uniform_buffer, 0, &uniforms, sizeof(uniforms));
 
@@ -1428,9 +1450,12 @@ int main(int argc, char *argv[]) {
               .storeOp = WGPUStoreOp_Store,
               //  .depthSlice = WGPU_DEPTH_SLICE_UNDEFINED,
               .clearValue = (const WGPUColor){
-                .r = sky_color[0],
-                .g = sky_color[1],
-                .b = sky_color[2],
+                .r = pow(sky_color[0] * sky_color_scale, 2.2),
+                .g = pow(sky_color[1] * sky_color_scale, 2.2),
+                .b = pow(sky_color[2] * sky_color_scale, 2.2),
+                // .r = pow(0.431, 2.2),
+                // .g = pow(0.694, 2.2),
+                // .b = pow(1.000, 2.2),
                 .a = 1.0,
               },
             },

@@ -282,6 +282,7 @@ struct mcapiConnection {
   void (*registry_data_cb)(mcapiConnection *, mcapiRegistryDataPacket);
   void (*chunk_and_light_data_cb)(mcapiConnection *, mcapiChunkAndLightDataPacket);
   void (*synchronize_player_position_cb)(mcapiConnection *, mcapiSynchronizePlayerPositionPacket);
+  void (*update_time_cb)(mcapiConnection *, mcapiUpdateTimePacket);
 
   // Play
 };
@@ -1385,6 +1386,13 @@ mcapiSynchronizePlayerPositionPacket create_synchronize_player_position_data_pac
   return res;
 }
 
+mcapiUpdateTimePacket create_update_time_packet(ReadableBuffer *p) {
+  mcapiUpdateTimePacket res = {};
+  res.world_age = read_long(p);
+  res.time_of_day = read_long(p);
+  return res;
+}
+
 #define mcapi_setcb_func(name, packet)                                                       \
   void mcapi_set_##name##_cb(mcapiConnection *conn, void (*cb)(mcapiConnection *, packet)) { \
     conn->name##_cb = cb;                                                                    \
@@ -1401,6 +1409,7 @@ mcapi_setcb_func(clientbound_known_packs, mcapiClientboundKnownPacksPacket);
 mcapi_setcb_func(registry_data, mcapiRegistryDataPacket);
 mcapi_setcb_func(chunk_and_light_data, mcapiChunkAndLightDataPacket);
 mcapi_setcb_func(synchronize_player_position, mcapiSynchronizePlayerPositionPacket);
+mcapi_setcb_func(update_time, mcapiUpdateTimePacket);
 
 #define READABLE_BUF_SIZE 1024 * 8
 
@@ -1516,9 +1525,12 @@ void mcapi_poll(mcapiConnection *conn) {
               // TODO: destory_chunk_and_light_data_packet(curr_packet)
               break;
             case SYNCHRONIZE_PLAYER_POSITION:
-              mcapiSynchronizePlayerPositionPacket syncPacket = create_synchronize_player_position_data_packet(&curr_packet);
-              if (conn->synchronize_player_position_cb) (*conn->synchronize_player_position_cb)(conn, syncPacket);
+              mcapiSynchronizePlayerPositionPacket sync_packet = create_synchronize_player_position_data_packet(&curr_packet);
+              if (conn->synchronize_player_position_cb) (*conn->synchronize_player_position_cb)(conn, sync_packet);
               break;
+            case UPDATE_TIME:
+              mcapiUpdateTimePacket time_packet = create_update_time_packet(&curr_packet);
+              if (conn->update_time_cb) (*conn->update_time_cb)(conn, time_packet);
             default:
               // printf("Unknown play packet %02x (len %ld)\n", type, curr_packet.buf.len);
               break;
