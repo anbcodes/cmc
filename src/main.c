@@ -5,13 +5,12 @@
 #include <string.h>
 
 #include "cJSON.h"
-#include "cglm/include/cglm/cglm.h"
+#include "cglm/cglm.h"
 #include "chunk.h"
 #include "framework.h"
 #include "lodepng/lodepng.h"
-#include "mcclient/mcapi.h"
-#include "wgpu/webgpu.h"
-#include "wgpu/wgpu.h"
+#include "mcapi.h"
+#include "wgpu.h"
 
 #if defined(GLFW_EXPOSE_NATIVE_COCOA)
 #include <Foundation/Foundation.h>
@@ -20,8 +19,8 @@
 
 #define GLFW_EXPOSE_NATIVE_WAYLAND
 #define GLFW_EXPOSE_NATIVE_X11
-#include "GLFW/include/GLFW/glfw3.h"
-#include "GLFW/include/GLFW/glfw3native.h"
+#include "GLFW/glfw3.h"
+#include "GLFW/glfw3native.h"
 
 #define LOG_PREFIX "[triangle]"
 #define MAX_BLOCKS 65536
@@ -1386,7 +1385,7 @@ int main(int argc, char *argv[]) {
     }
 
     uniforms.internal_sky_max = sky_max / 15.0f;
-    float sky_color_scale = pow(glm_clamp((sky_max - 4.0)/11.0, 0.0, 1.0), 3.0);
+    float sky_color_scale = pow(glm_clamp((sky_max - 4.0) / 11.0, 0.0, 1.0), 3.0);
 
     // Send uniforms to GPU
     wgpuQueueWriteBuffer(queue, uniform_buffer, 0, &uniforms, sizeof(uniforms));

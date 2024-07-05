@@ -1,10 +1,7 @@
-a.out
-wgpu
-GLFW
-GLFW-src
-cglm
+lib
 data
 core
 texture_sheet.png
 cmc
+build
 .cache

@@ -1,5 +1,5 @@
-#include "wgpu/webgpu.h"
-#include "cglm/include/cglm/cglm.h"
+#include "cglm/cglm.h"
+#include "webgpu.h"
 
 #define FLOATS_PER_VERTEX 14
 #define MAX_CHUNKS 1024
@@ -43,10 +43,10 @@ typedef struct ChunkSection {
   int x;
   int y;
   int z;
-  int data[CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE];
-  uint8_t sky_light[CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE];
-  uint8_t block_light[CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE];
-  int biome_data[4*4*4];
+  int data[CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
+  uint8_t sky_light[CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
+  uint8_t block_light[CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
+  int biome_data[4 * 4 * 4];
   WGPUBuffer vertex_buffer;
   int num_quads;
 } ChunkSection;

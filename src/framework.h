@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "wgpu/wgpu.h"
+#include "wgpu.h"
 
 #define UNUSED(x) (void)x;
 
