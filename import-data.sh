@@ -9,8 +9,8 @@ rm -rf ./data
 
 mkdir -p ./data
 
-if [ ! -f "$HOME/.minecraft/versions/1.20.6/1.20.6.jar" ]; then
-  echo "You must launch minecraft 1.20.6 at least once!"
+if [ ! -f "$HOME/.minecraft/versions/1.21/1.21.jar" ]; then
+  echo "You must launch minecraft 1.21 at least once!"
   exit 1
 fi
 
@@ -18,7 +18,7 @@ echo "Extracting client jar..."
 
 pushd data
 
-unzip "$HOME/.minecraft/versions/1.20.6/1.20.6.jar" "data/*" "assets/*"
+unzip "$HOME/.minecraft/versions/1.21/1.21.jar" "data/*" "assets/*"
 
 popd
 

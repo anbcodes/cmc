@@ -1026,13 +1026,11 @@ void send_packet(mcapiConnection *conn, const mcapiBuffer packet) {
   if (conn->compression_threshold > 0) {
     if (packet.len < conn->compression_threshold) {
       write_varint(&header_buffer, packet.len + 1);
-      printf("Sending uncompressed\n");
       write_varint(&header_buffer, 0);
       write(conn->sockfd, header_buffer.buf.buffer.ptr, header_buffer.buf.len);
       write(conn->sockfd, packet.ptr, packet.len);
 
     } else {
-      printf("Sending compressed\n");
       struct libdeflate_compressor *compressor = libdeflate_alloc_compressor(6);
       int max_size = libdeflate_zlib_compress_bound(compressor, packet.len);
       mcapiBuffer compressed_buf = mcapi_create_buffer(max_size);
@@ -1474,10 +1472,8 @@ void mcapi_poll(mcapiConnection *conn) {
 
         if (conn->compression_threshold > 0) {
           if (curr_packet.buf.ptr[0] == 0) {
-            printf("Skipping first byte\n");
             curr_packet.cursor = 1;  // Skip data length byte
           } else {
-            printf("Decompressing packet\n");
             struct libdeflate_decompressor *decompressor = libdeflate_alloc_decompressor();
             int decompressed_length = read_varint(&curr_packet);
             mcapiBuffer decompressed = mcapi_create_buffer(decompressed_length);

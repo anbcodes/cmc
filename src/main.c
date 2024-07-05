@@ -668,7 +668,7 @@ int main(int argc, char *argv[]) {
   mcapi_send_handshake(
     conn,
     (mcapiHandshakePacket){
-      .protocol_version = 766,
+      .protocol_version = 767,
       .server_addr = server_ip,
       .server_port = port,
       .next_state = 2,
