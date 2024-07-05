@@ -7,7 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../cglm/include/cglm/cglm.h"
+#include "cglm/cglm.h"
+#include "libdeflate.h"
 #include "sockets.h"
 
 #define ntohll(x) (((uint64_t)ntohl((x) & 0xFFFFFFFF) << 32) | ntohl((x) >> 32))
@@ -1023,22 +1024,38 @@ void send_packet(mcapiConnection *conn, const mcapiBuffer packet) {
   // printf("Sending packet %x (compthresh %d, len %ld)\n", packet.ptr[0], conn->compression_threshold, packet.len);
 
   if (conn->compression_threshold > 0) {
-    write_varint(&header_buffer, packet.len + 1);
-
     if (packet.len < conn->compression_threshold) {
+      write_varint(&header_buffer, packet.len + 1);
       printf("Sending uncompressed\n");
       write_varint(&header_buffer, 0);
+      write(conn->sockfd, header_buffer.buf.buffer.ptr, header_buffer.buf.len);
+      write(conn->sockfd, packet.ptr, packet.len);
+
     } else {
-      perror("No support for compressed packets!");
-      exit(1);
+      printf("Sending compressed\n");
+      struct libdeflate_compressor *compressor = libdeflate_alloc_compressor(6);
+      int max_size = libdeflate_zlib_compress_bound(compressor, packet.len);
+      mcapiBuffer compressed_buf = mcapi_create_buffer(max_size);
+      compressed_buf.len = libdeflate_zlib_compress(compressor, packet.ptr, packet.len, compressed_buf.ptr, compressed_buf.len);
+
+      write_varint(&header_buffer, packet.len);
+      int total_len = compressed_buf.len + header_buffer.buf.len;
+      header_buffer.cursor = header_buffer.buf.len = 0;
+      write_varint(&header_buffer, total_len);
+      write_varint(&header_buffer, packet.len);
+
+      write(conn->sockfd, header_buffer.buf.buffer.ptr, header_buffer.buf.len);
+      write(conn->sockfd, compressed_buf.ptr, compressed_buf.len);
+
+      mcapi_destroy_buffer(compressed_buf);
+      libdeflate_free_compressor(compressor);
     }
 
   } else {
     write_varint(&header_buffer, packet.len);
+    write(conn->sockfd, header_buffer.buf.buffer.ptr, header_buffer.buf.len);
+    write(conn->sockfd, packet.ptr, packet.len);
   }
-
-  write(conn->sockfd, header_buffer.buf.buffer.ptr, header_buffer.buf.len);
-  write(conn->sockfd, packet.ptr, packet.len);
 
   destroy_writable_buffer(header_buffer);
 }
@@ -1460,8 +1477,17 @@ void mcapi_poll(mcapiConnection *conn) {
             printf("Skipping first byte\n");
             curr_packet.cursor = 1;  // Skip data length byte
           } else {
-            perror("No support for compressed packets yet!\n");
-            exit(1);
+            printf("Decompressing packet\n");
+            struct libdeflate_decompressor *decompressor = libdeflate_alloc_decompressor();
+            int decompressed_length = read_varint(&curr_packet);
+            mcapiBuffer decompressed = mcapi_create_buffer(decompressed_length);
+
+            libdeflate_zlib_decompress(decompressor, curr_packet.buf.ptr + curr_packet.cursor, curr_packet.buf.len - curr_packet.cursor, decompressed.ptr, decompressed.len, &decompressed.len);
+            mcapi_destroy_buffer(curr_packet.buf);
+            curr_packet.buf = decompressed;
+            curr_packet.cursor = 0;
+            // perror("No support for compressed packets yet!\n");
+            // exit(1);
           }
         }
 
