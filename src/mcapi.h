@@ -28,7 +28,7 @@ void mcapi_print_str(mcapiString str);
 
 typedef struct mcapiConnection mcapiConnection;
 
-mcapiConnection* mcapi_create_connection(char* hostname, short port);
+mcapiConnection* mcapi_create_connection(char* hostname, short port, char* uuid, char* access_token);
 void mcapi_set_state(mcapiConnection* conn, mcapiConnState state);
 mcapiConnState mcapi_get_state(mcapiConnection* conn);
 
@@ -215,7 +215,7 @@ void mcapi_set_registry_data_cb(mcapiConnection* conn, void (*cb)(mcapiConnectio
 
 typedef struct mcapiBitSet {
   int length;
-  uint64_t *data;
+  uint64_t* data;
 } mcapiBitSet;
 
 typedef struct mcapiBlockEntity {
@@ -223,7 +223,7 @@ typedef struct mcapiBlockEntity {
   uint8_t z;
   short y;
   int type;
-  mcapiNBT *data;
+  mcapiNBT* data;
 } mcapiBlockEntity;
 
 typedef struct mcapiChunkSection {

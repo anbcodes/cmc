@@ -15,6 +15,8 @@ add_executable(cmc src/main.c
 )
 
 target_link_libraries(cmc PUBLIC "${CMAKE_SOURCE_DIR}/lib/wgpu/libwgpu_native.a")
+target_link_libraries(cmc PUBLIC crypto)
+target_link_libraries(cmc PUBLIC curl)
 target_link_libraries(cmc PUBLIC libdeflate_static)
 target_link_libraries(cmc PUBLIC glfw)
 target_link_libraries(cmc PUBLIC cglm)

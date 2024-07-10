@@ -1,6 +1,13 @@
 #include "mcapi.h"
 
 #include <assert.h>
+#include <curl/curl.h>
+#include <openssl/conf.h>
+#include <openssl/decoder.h>
+#include <openssl/err.h>
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <openssl/rsa.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -275,6 +282,14 @@ struct mcapiConnection {
   mcapiConnState state;
   int compression_threshold;
 
+  mcapiString uuid;
+  mcapiString access_token;
+
+  bool encryption_enabled;
+  mcapiBuffer shared_secret;
+  EVP_CIPHER_CTX *encrypt_ctx;
+  EVP_CIPHER_CTX *decrypt_ctx;
+
   // Callbacks
 
   // Init
@@ -289,7 +304,7 @@ struct mcapiConnection {
   // Play
 };
 
-mcapiConnection *mcapi_create_connection(char *hostname, short port) {
+mcapiConnection *mcapi_create_connection(char *hostname, short port, char *uuid, char *access_token) {
   char protoname[] = "tcp";
   struct protoent *protoent;
   char *server_hostname = hostname;
@@ -339,7 +354,14 @@ mcapiConnection *mcapi_create_connection(char *hostname, short port) {
 
   set_socket_blocking_enabled(sockfd, false);
 
+  // Initalize openssl
+  OpenSSL_add_all_algorithms();
+  ERR_load_crypto_strings();
+  OPENSSL_config(NULL);
+
   mcapiConnection *conn = calloc(1, sizeof(mcapiConnection));
+  conn->access_token = mcapi_to_string(access_token);
+  conn->uuid = mcapi_to_string(uuid);
 
   conn->sockfd = sockfd;
 
@@ -409,7 +431,12 @@ void resizeable_buffer_ensure_capacity(ResizeableBuffer *buf, int capacity) {
     mcapiBuffer old_buf = buf->buffer;
     int oldlen = buf->buffer.len;
 
-    buf->buffer = mcapi_create_buffer(oldlen * 2);
+    int newlen = oldlen * 2;
+    while (newlen < capacity) {
+      newlen *= 2;
+    }
+
+    buf->buffer = mcapi_create_buffer(newlen);
     memcpy(buf->buffer.ptr, old_buf.ptr, oldlen);
 
     mcapi_destroy_buffer(old_buf);
@@ -472,6 +499,15 @@ void write_bytes(WritableBuffer *io, void *src, int len) {
   memcpy(io->buf.buffer.ptr, src, len);
 
   io->cursor += len;
+  if (io->cursor > io->buf.len) io->buf.len = io->cursor;
+}
+
+void write_buffer(WritableBuffer *io, mcapiBuffer buf) {
+  resizeable_buffer_ensure_capacity(&io->buf, io->cursor + buf.len);
+
+  memcpy(io->buf.buffer.ptr + io->cursor, buf.ptr, buf.len);
+
+  io->cursor += buf.len;
   if (io->cursor > io->buf.len) io->buf.len = io->cursor;
 }
 
@@ -1023,17 +1059,19 @@ void send_packet(mcapiConnection *conn, const mcapiBuffer packet) {
 
   // printf("Sending packet %x (compthresh %d, len %ld)\n", packet.ptr[0], conn->compression_threshold, packet.len);
 
+  mcapiBuffer const *rest_of_packet = NULL;
+  mcapiBuffer compressed_buf = {};
+  mcapiBuffer encrypted = {};
+
   if (conn->compression_threshold > 0) {
     if (packet.len < conn->compression_threshold) {
       write_varint(&header_buffer, packet.len + 1);
       write_varint(&header_buffer, 0);
-      write(conn->sockfd, header_buffer.buf.buffer.ptr, header_buffer.buf.len);
-      write(conn->sockfd, packet.ptr, packet.len);
-
+      rest_of_packet = &packet;
     } else {
       struct libdeflate_compressor *compressor = libdeflate_alloc_compressor(6);
       int max_size = libdeflate_zlib_compress_bound(compressor, packet.len);
-      mcapiBuffer compressed_buf = mcapi_create_buffer(max_size);
+      compressed_buf = mcapi_create_buffer(max_size);
       compressed_buf.len = libdeflate_zlib_compress(compressor, packet.ptr, packet.len, compressed_buf.ptr, compressed_buf.len);
 
       write_varint(&header_buffer, packet.len);
@@ -1042,20 +1080,31 @@ void send_packet(mcapiConnection *conn, const mcapiBuffer packet) {
       write_varint(&header_buffer, total_len);
       write_varint(&header_buffer, packet.len);
 
-      write(conn->sockfd, header_buffer.buf.buffer.ptr, header_buffer.buf.len);
-      write(conn->sockfd, compressed_buf.ptr, compressed_buf.len);
+      rest_of_packet = &compressed_buf;
 
-      mcapi_destroy_buffer(compressed_buf);
       libdeflate_free_compressor(compressor);
     }
-
   } else {
     write_varint(&header_buffer, packet.len);
-    write(conn->sockfd, header_buffer.buf.buffer.ptr, header_buffer.buf.len);
-    write(conn->sockfd, packet.ptr, packet.len);
+    rest_of_packet = &packet;
   }
 
+  mcapiBuffer new_packet = mcapi_create_buffer(header_buffer.buf.len + rest_of_packet->len);
+  memcpy(new_packet.ptr, header_buffer.buf.buffer.ptr, header_buffer.buf.len);
+  memcpy(new_packet.ptr + header_buffer.buf.len, rest_of_packet->ptr, rest_of_packet->len);
+
+  if (conn->encryption_enabled) {
+    // int encrypted_len = 0;
+    // EVP_CipherUpdate(conn->encrypt_ctx, NULL, &encrypted_len, rest_of_packet->ptr, rest_of_packet->len);
+    // mcapiBuffer encrypted = mcapi_create_buffer(new_packet);
+    EVP_CipherUpdate(conn->encrypt_ctx, new_packet.ptr, &new_packet.len, new_packet.ptr, new_packet.len);
+  }
+
+  write(conn->sockfd, new_packet.ptr, new_packet.len);
+
   destroy_writable_buffer(header_buffer);
+  if (compressed_buf.len != 0) mcapi_destroy_buffer(compressed_buf);
+  if (encrypted.len != 0) mcapi_destroy_buffer(encrypted);
 }
 
 #define INTERNAL_BUF_SIZE 1024 * 1024
@@ -1089,6 +1138,23 @@ void mcapi_send_login_start(mcapiConnection *conn, mcapiLoginStartPacket p) {
   write_varint(&reusable_buffer, LOGIN_START);  // Packet ID
   write_string(&reusable_buffer, p.username);
   write_uuid(&reusable_buffer, p.uuid);
+
+  send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
+}
+
+typedef struct EncryptionResponsePacket {
+  mcapiBuffer enc_shared_secret;
+  mcapiBuffer enc_verify_token;
+} EncryptionResponsePacket;
+
+void send_encryption_response_packet(mcapiConnection *conn, EncryptionResponsePacket p) {
+  reusable_buffer.cursor = 0;
+  reusable_buffer.buf.len = 0;
+  write_varint(&reusable_buffer, ENCRYPTION_RESPONSE);  // Packet ID
+  write_varint(&reusable_buffer, p.enc_shared_secret.len);
+  write_buffer(&reusable_buffer, p.enc_shared_secret);
+  write_varint(&reusable_buffer, p.enc_verify_token.len);
+  write_buffer(&reusable_buffer, p.enc_verify_token);
 
   send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
 }
@@ -1172,6 +1238,24 @@ typedef struct SetCompressionPacket {
 SetCompressionPacket read_set_compression_packet(ReadableBuffer *p) {
   SetCompressionPacket res = {};
   res.threshold = read_varint(p);
+  return res;
+}
+
+typedef struct EncryptionRequestPacket {
+  mcapiString serverId;
+  mcapiBuffer publicKey;
+  mcapiBuffer verifyToken;
+  bool shouldAuthenticate;
+} EncryptionRequestPacket;
+
+EncryptionRequestPacket read_encryption_request_packet(ReadableBuffer *p) {
+  EncryptionRequestPacket res = {};
+  res.serverId = read_string(p);
+  int publen = read_varint(p);
+  res.publicKey = read_bytes(p, publen);
+  int verifylen = read_varint(p);
+  res.verifyToken = read_bytes(p, verifylen);
+  res.shouldAuthenticate = read_byte(p);
   return res;
 }
 
@@ -1448,7 +1532,12 @@ void mcapi_poll(mcapiConnection *conn) {
     readable.buf.len = nbytes_read;
     readable.cursor = 0;
 
-    readable.cursor = 0;
+    if (conn->encryption_enabled) {
+      // Decrypt
+      if (1 != EVP_CipherUpdate(conn->decrypt_ctx, readable.buf.ptr, &readable.buf.len, readable.buf.ptr, readable.buf.len)) {
+        ERR_print_errors_fp(stderr);
+      }
+    }
 
     while (readable.cursor < readable.buf.len) {
       if (curr_packet.buf.len == 0) {
@@ -1497,6 +1586,135 @@ void mcapi_poll(mcapiConnection *conn) {
             case SET_COMPRESSION:
               printf("Enabling compression\n");
               conn->compression_threshold = read_set_compression_packet(&curr_packet).threshold;
+              break;
+            case ENCRYPTION_REQUEST:
+              printf("Enabling encryption\n");
+              EncryptionRequestPacket encrypt_req = read_encryption_request_packet(&curr_packet);
+              mcapiBuffer shared_secret = mcapi_create_buffer(16);
+              RAND_bytes(shared_secret.ptr, shared_secret.len);
+
+              if (encrypt_req.shouldAuthenticate) {
+                // Get hash
+                EVP_MD_CTX *mdCtx = EVP_MD_CTX_new();
+                mcapiBuffer hash = mcapi_create_buffer(20);
+                if (1 != EVP_DigestInit_ex(mdCtx, EVP_sha1(), NULL)) ERR_print_errors_fp(stderr);
+                if (1 != EVP_DigestUpdate(mdCtx, encrypt_req.serverId.ptr, encrypt_req.serverId.len)) ERR_print_errors_fp(stderr);
+                if (1 != EVP_DigestUpdate(mdCtx, shared_secret.ptr, shared_secret.len)) ERR_print_errors_fp(stderr);
+                if (1 != EVP_DigestUpdate(mdCtx, encrypt_req.publicKey.ptr, encrypt_req.publicKey.len)) ERR_print_errors_fp(stderr);
+                if (1 != EVP_DigestFinal_ex(mdCtx, hash.ptr, NULL)) ERR_print_errors_fp(stderr);
+                EVP_MD_CTX_free(mdCtx);
+
+                // Convert hash to string
+
+                char *hex_chars = "0123456789abcdef";
+
+                WritableBuffer hash_as_string = create_writable_buffer();
+
+                bool is_neg = hash.ptr[0] & 0b10000000;
+                if (is_neg) {
+                  write_byte(&hash_as_string, '-');
+                  write_byte(&hash_as_string, hex_chars[((~hash.ptr[0]) & 0b11110000) >> 4]);
+                  write_byte(&hash_as_string, hex_chars[((~hash.ptr[0]) & 0b00001111)]);
+                }
+                for (int i = is_neg ? 1 : 0; i < 20; i++) {
+                  int v = is_neg ? (~hash.ptr[i]) : hash.ptr[i];
+                  if (is_neg && i == 19) {
+                    v++;
+                  }
+                  write_byte(&hash_as_string, hex_chars[(v & 0b11110000) >> 4]);
+                  write_byte(&hash_as_string, hex_chars[v & 0b00001111]);
+                }
+
+                // Authenticate with servers
+
+                WritableBuffer json = create_writable_buffer();
+                write_buffer(&json, mcapi_to_string("{\"accessToken\":\""));
+                write_buffer(&json, conn->access_token);
+                write_buffer(&json, mcapi_to_string("\", \"selectedProfile\":\""));
+                write_buffer(&json, conn->uuid);
+                write_buffer(&json, mcapi_to_string("\", \"serverId\":\""));
+                write_buffer(&json, resizable_buffer_to_buffer(hash_as_string.buf));
+                write_buffer(&json, mcapi_to_string("\"}"));
+                write_byte(&json, '\0');  // Allows it to be used like a c str
+
+                printf("JSON\n%s\n", json.buf.buffer.ptr);
+
+                CURL *curl;
+                curl_global_init(CURL_GLOBAL_ALL);
+                curl = curl_easy_init();
+                struct curl_slist *headers = NULL;
+                headers = curl_slist_append(headers, "Accept: application/json");
+                headers = curl_slist_append(headers, "Content-Type: application/json");
+
+                curl_easy_setopt(curl, CURLOPT_URL, "https://sessionserver.mojang.com/session/minecraft/join");
+
+                curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json.buf.buffer.ptr);
+                curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+                curl_easy_perform(curl);
+                curl_easy_cleanup(curl);
+              }
+
+              // Encryption stuff
+
+              // Decode the key
+              EVP_PKEY *pkey = NULL;
+              OSSL_DECODER_CTX *decoder_ctx = OSSL_DECODER_CTX_new_for_pkey(&pkey, "DER", NULL, "RSA", EVP_PKEY_PUBLIC_KEY, NULL, NULL);
+              printf("Got here\n");
+              fflush(stdout);
+              if (decoder_ctx == NULL) {
+                printf("Error\n");
+                ERR_print_errors_fp(stderr);
+              }
+              mcapiBuffer pubkey = encrypt_req.publicKey;
+              printf("pubkey %p\n", encrypt_req.publicKey.ptr);
+              if (1 != OSSL_DECODER_from_data(decoder_ctx, &pubkey.ptr, &pubkey.len)) ERR_print_errors_fp(stderr);
+
+              // Encrypt secret (https://www.openssl.org/docs/man3.0/man3/EVP_PKEY_encrypt.html)
+              EVP_PKEY_CTX *pkey_ctx = EVP_PKEY_CTX_new(pkey, NULL);
+              if (1 != EVP_PKEY_encrypt_init(pkey_ctx)) ERR_print_errors_fp(stderr);
+              if (1 != EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_PKCS1_PADDING)) ERR_print_errors_fp(stderr);
+
+              int ss_encrypted_len = 0;
+
+              // Get length
+              if (1 != EVP_PKEY_encrypt(pkey_ctx, NULL, &ss_encrypted_len, shared_secret.ptr, shared_secret.len)) ERR_print_errors_fp(stderr);
+
+              // Encrypt
+              mcapiBuffer ss_encrypted = mcapi_create_buffer(ss_encrypted_len);
+              if (1 != EVP_PKEY_encrypt(pkey_ctx, ss_encrypted.ptr, &ss_encrypted.len, shared_secret.ptr, shared_secret.len)) ERR_print_errors_fp(stderr);
+
+              // Encrypt token
+
+              int vt_encrypted_len = 0;
+
+              // Get length
+              if (1 != EVP_PKEY_encrypt(pkey_ctx, NULL, &vt_encrypted_len, encrypt_req.verifyToken.ptr, encrypt_req.verifyToken.len)) ERR_print_errors_fp(stderr);
+
+              // Encrypt
+              mcapiBuffer vt_encrypted = mcapi_create_buffer(vt_encrypted_len);
+              if (1 != EVP_PKEY_encrypt(pkey_ctx, vt_encrypted.ptr, &vt_encrypted.len, encrypt_req.verifyToken.ptr, encrypt_req.verifyToken.len)) ERR_print_errors_fp(stderr);
+
+              send_encryption_response_packet(conn, (EncryptionResponsePacket){
+                                                      .enc_shared_secret = ss_encrypted,
+                                                      .enc_verify_token = vt_encrypted,
+                                                    });
+
+              mcapi_destroy_buffer(ss_encrypted);
+              mcapi_destroy_buffer(vt_encrypted);
+              EVP_PKEY_free(pkey);
+              EVP_PKEY_CTX_free(pkey_ctx);
+              OSSL_DECODER_CTX_free(decoder_ctx);
+
+              conn->shared_secret = shared_secret;
+
+              // Set up sym encryption/decryption
+              conn->encrypt_ctx = EVP_CIPHER_CTX_new();
+              conn->decrypt_ctx = EVP_CIPHER_CTX_new();
+              if (1 != EVP_CipherInit_ex2(conn->encrypt_ctx, EVP_aes_128_cfb8(), shared_secret.ptr, shared_secret.ptr, 1, NULL)) ERR_print_errors_fp(stderr);
+              if (1 != EVP_CipherInit_ex2(conn->decrypt_ctx, EVP_aes_128_cfb8(), shared_secret.ptr, shared_secret.ptr, 0, NULL)) ERR_print_errors_fp(stderr);
+
+              conn->encryption_enabled = true;
               break;
             case LOGIN_SUCCESS:
               mcapiLoginSuccessPacket packet = create_login_success_packet(&curr_packet);

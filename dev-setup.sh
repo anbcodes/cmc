@@ -7,6 +7,9 @@ pushd $(dirname $0) > /dev/null
 
 echo "Setting up dev env for linux"
 
+echo "Installing libraries..."
+sudo apt-get install libssl-dev libcurl4-openssl-dev
+
 mkdir -p lib
 
 if [ ! -d lib/wgpu ]; then

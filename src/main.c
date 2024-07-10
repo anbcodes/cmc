@@ -644,14 +644,16 @@ int add_texture(cJSON *textures, const char *name, unsigned char *texture_sheet,
 }
 
 int main(int argc, char *argv[]) {
-  if (argc < 4) {
-    perror("Usage: cmc [username] [server ip] [port]\n");
+  if (argc < 6) {
+    perror("Usage: cmc [username] [server ip] [port] [uuid] [access_token]\n");
     exit(1);
   }
 
   char *username = argv[1];
   char *server_ip = argv[2];
   long long _port = strtol(argv[3], NULL, 10);
+  char *uuid = argv[4];
+  char *access_token = argv[5];
 
   if (_port < 1 || _port > 65535) {
     perror("Invalid port. Must be between 1 and 65535\n");
@@ -662,7 +664,7 @@ int main(int argc, char *argv[]) {
 
   frmwrk_setup_logging(WGPULogLevel_Warn);
 
-  mcapiConnection *conn = mcapi_create_connection(server_ip, port);
+  mcapiConnection *conn = mcapi_create_connection(server_ip, port, uuid, access_token);
   game.conn = conn;
 
   mcapi_send_handshake(

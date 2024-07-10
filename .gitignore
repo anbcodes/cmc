@@ -5,3 +5,4 @@ texture_sheet.png
 cmc
 build
 .cache
+run-with-token.sh
