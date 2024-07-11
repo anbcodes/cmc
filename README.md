@@ -4,19 +4,26 @@
 
 If you are on debian linux run `./dev-setup.sh` and `./import-data.sh`.
 
-To build run `./build.sh` and then `./cmc [username] [server ip] [port]`
+To build run
+- `mkdir build && cd build`
+- `cmake ..`
+- `cmake --build . -j8`
+
+To run
+- Create a Minecraft profile and set a custom Java executable to the path of `custommc.sh`
+- Run that Minecraft profile which creates a file called `./run-with-token.sh`
+- Edit that file to change the server hostname and port.
+- Run `./run-with-token.sh`
 
 ### Generic instructions
 
+- `mkdir lib`
 - Download the prebuilt WGPU libraries from
   https://github.com/gfx-rs/wgpu-native/releases and put the extracted zip in
-  the `wgpu` directory
-- Download the GLFW sources from the version pointed to from
+  the `lib/wgpu` directory
+- Download the GLFW sources into `lib/glfw` from the version pointed to from
   https://github.com/gfx-rs/wgpu-native/tree/trunk/examples/vendor
-- Follow the build instructions for GLFW
-  https://www.glfw.org/docs/3.3/compile.html
-- From the GLFW build directory, run `cmake --install . --prefix ../../GLFW`
-- From the main directory, run `git clone https://github.com/recp/cglm.git` to
+- From the main directory, run `git clone https://github.com/recp/cglm.git -o ./lib/cglm` to
   get cglm. It works as a header-only library.
 - Retrieve `blocks.json` from the server jar with the following and place it in
   `/data`.
@@ -28,17 +35,15 @@ java -DbundlerMainClass=net.minecraft.data.Main -jar paper-1.20.6-145.jar --repo
 - To load default client resources, copy your client jar from
   `~/.minecraft/versions` to `/data` and extract it with `gunzip 1.20.6.jar`. To
   clean things up you can `rm *.class` as these files are not needed.
-- To compile
+- To compile and run follow the instructions above
 
-```
-gcc main.c framework.c chunk.c mcclient/mcapi.c cJSON.c lodepng/lodepng.c wgpu/libwgpu_native.a GLFW/lib/libglfw3.a -lm -o cmc
-```
+## Features
 
-- This creates the executable `cmc`. Run the client with
-
-```
-./cmc aaabbb 127.0.0.1 25565
-```
+- Offline and online mode support
+- Encryption support
+- Basic rendering
+- Building and breaking blocks
+- Player movement
 
 ## Debugging
 
