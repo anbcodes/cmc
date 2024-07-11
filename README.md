@@ -1,3 +1,7 @@
+# cmc
+
+![cmc-1](https://github.com/anbcodes/cmc/assets/31807975/58914050-79d8-4e23-8efa-4880a7b58348)
+
 ## Project setup
 
 ### Debian Linux
