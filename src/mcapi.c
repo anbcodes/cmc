@@ -290,6 +290,9 @@ struct mcapiConnection {
   EVP_CIPHER_CTX *encrypt_ctx;
   EVP_CIPHER_CTX *decrypt_ctx;
 
+  struct libdeflate_compressor* compressor;
+  struct libdeflate_decompressor* decompressor;
+
   // Callbacks
 
   // Init
@@ -365,7 +368,21 @@ mcapiConnection *mcapi_create_connection(char *hostname, short port, char *uuid,
 
   conn->sockfd = sockfd;
 
+  conn->compressor = libdeflate_alloc_compressor(6);
+  conn->decompressor = libdeflate_alloc_decompressor();
+
   return conn;
+}
+
+void mcapi_destroy_connection(mcapiConnection *conn) {
+  libdeflate_free_compressor(conn->compressor);
+  libdeflate_free_decompressor(conn->decompressor);
+  
+  close(conn->sockfd);
+  
+  EVP_cleanup();
+  CRYPTO_cleanup_all_ex_data();
+  ERR_free_strings();
 }
 
 void mcapi_set_state(mcapiConnection *conn, mcapiConnState state) {
@@ -765,6 +782,10 @@ mcapiBitSet read_bitset(ReadableBuffer *io) {
   return bitset;
 }
 
+void * destroy_bitset(mcapiBitSet bs) {
+  free(bs.data);
+}
+
 bool bitset_at(mcapiBitSet bitset, int index) {
   int word = index / 64;
   if (word >= bitset.length) {
@@ -1051,6 +1072,32 @@ mcapiNBT *mcapi_nbt_get_compound_tag(mcapiNBT *nbt, char *name) {
   }
   return NULL;
 }
+void _destroy_nbt_recur(mcapiNBT* nbt);
+
+void mcapi_destroy_nbt(mcapiNBT* nbt) {
+  _destroy_nbt_recur(nbt);
+  free(nbt);
+}
+
+void _destroy_nbt_recur(mcapiNBT* nbt) {
+  if (nbt->type == MCAPI_NBT_COMPOUND) {
+    for (int i = 0; i < nbt->compound_value.count; i++) {
+      _destroy_nbt_recur(&nbt->compound_value.children[i]);
+    }
+    free(nbt->compound_value.children);
+  } else if (nbt->type == MCAPI_NBT_LIST) {
+    for (int i = 0; i < nbt->list_value.size; i++) {
+      _destroy_nbt_recur(&nbt->list_value.items[i]);
+    }
+    free(nbt->list_value.items);
+  } else if (nbt->type == MCAPI_NBT_BYTE_ARRAY) {
+    mcapi_destroy_buffer(nbt->byte_array_value);
+  } else if (nbt->type == MCAPI_NBT_INT_ARRAY) {
+    free(nbt->int_array_value.data);
+  } else if (nbt->type == MCAPI_NBT_LONG_ARRAY) {
+    free(nbt->long_array_value.data);
+  }
+}
 
 /* --- Sending Packet Code --- */
 
@@ -1069,10 +1116,9 @@ void send_packet(mcapiConnection *conn, const mcapiBuffer packet) {
       write_varint(&header_buffer, 0);
       rest_of_packet = &packet;
     } else {
-      struct libdeflate_compressor *compressor = libdeflate_alloc_compressor(6);
-      int max_size = libdeflate_zlib_compress_bound(compressor, packet.len);
+      int max_size = libdeflate_zlib_compress_bound(conn->compressor, packet.len);
       compressed_buf = mcapi_create_buffer(max_size);
-      compressed_buf.len = libdeflate_zlib_compress(compressor, packet.ptr, packet.len, compressed_buf.ptr, compressed_buf.len);
+      compressed_buf.len = libdeflate_zlib_compress(conn->compressor, packet.ptr, packet.len, compressed_buf.ptr, compressed_buf.len);
 
       write_varint(&header_buffer, packet.len);
       int total_len = compressed_buf.len + header_buffer.buf.len;
@@ -1081,8 +1127,6 @@ void send_packet(mcapiConnection *conn, const mcapiBuffer packet) {
       write_varint(&header_buffer, packet.len);
 
       rest_of_packet = &compressed_buf;
-
-      libdeflate_free_compressor(compressor);
     }
   } else {
     write_varint(&header_buffer, packet.len);
@@ -1104,6 +1148,7 @@ void send_packet(mcapiConnection *conn, const mcapiBuffer packet) {
 
   write(conn->sockfd, new_packet.ptr, new_packet.len);
 
+  mcapi_destroy_buffer(new_packet);
   destroy_writable_buffer(header_buffer);
   if (compressed_buf.len != 0) mcapi_destroy_buffer(compressed_buf);
   if (encrypted.len != 0) mcapi_destroy_buffer(encrypted);
@@ -1329,9 +1374,7 @@ mcapiRegistryDataPacket create_registry_data_packet(ReadableBuffer *p) {
 
 void destroy_registry_data_packet(mcapiRegistryDataPacket p) {
   for (int i = 0; i < p.entry_count; i++) {
-    // free(p.entry_names[i].ptr);
-    // TODO: Implement destrying NBT
-    // destroy_nbt(p.entries[i]);
+    mcapi_destroy_nbt(p.entries[i]);
   }
   free(p.entry_names);
   free(p.entries);
@@ -1473,7 +1516,21 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
   }
   assert(block_data_count == block_light_array_count);
 
+  destroy_bitset(sky_light_mask);
+  destroy_bitset(block_light_mask);
+  destroy_bitset(empty_sky_light_mask);
+  destroy_bitset(empty_block_light_mask);
+
   return res;
+}
+
+void destory_chunk_and_light_data_packet(mcapiChunkAndLightDataPacket p) {
+  mcapi_destroy_nbt(p.heightmaps);
+  free(p.chunk_sections);
+  for (int i = 0; i < p.block_entity_count; i++) {
+    mcapi_destroy_nbt(p.block_entities[i].data);
+  }
+  free(p.block_entities);
 }
 
 mcapiSynchronizePlayerPositionPacket create_synchronize_player_position_data_packet(ReadableBuffer *p) {
@@ -1567,11 +1624,10 @@ void mcapi_poll(mcapiConnection *conn) {
           if (curr_packet.buf.ptr[0] == 0) {
             curr_packet.cursor = 1;  // Skip data length byte
           } else {
-            struct libdeflate_decompressor *decompressor = libdeflate_alloc_decompressor();
             int decompressed_length = read_varint(&curr_packet);
             mcapiBuffer decompressed = mcapi_create_buffer(decompressed_length);
 
-            libdeflate_zlib_decompress(decompressor, curr_packet.buf.ptr + curr_packet.cursor, curr_packet.buf.len - curr_packet.cursor, decompressed.ptr, decompressed.len, &decompressed.len);
+            libdeflate_zlib_decompress(conn->decompressor, curr_packet.buf.ptr + curr_packet.cursor, curr_packet.buf.len - curr_packet.cursor, decompressed.ptr, decompressed.len, &decompressed.len);
             mcapi_destroy_buffer(curr_packet.buf);
             curr_packet.buf = decompressed;
             curr_packet.cursor = 0;
@@ -1629,6 +1685,8 @@ void mcapi_poll(mcapiConnection *conn) {
                   write_byte(&hash_as_string, hex_chars[v & 0b00001111]);
                 }
 
+                mcapi_destroy_buffer(hash);
+
                 // Authenticate with servers
 
                 WritableBuffer json = create_writable_buffer();
@@ -1640,6 +1698,8 @@ void mcapi_poll(mcapiConnection *conn) {
                 write_buffer(&json, resizable_buffer_to_buffer(hash_as_string.buf));
                 write_buffer(&json, mcapi_to_string("\"}"));
                 write_byte(&json, '\0');  // Allows it to be used like a c str
+
+                destroy_writable_buffer(hash_as_string);
 
                 printf("JSON\n%s\n", json.buf.buffer.ptr);
 
@@ -1657,6 +1717,8 @@ void mcapi_poll(mcapiConnection *conn) {
                 curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
                 curl_easy_perform(curl);
                 curl_easy_cleanup(curl);
+                curl_slist_free_all(headers);
+                destroy_writable_buffer(json);
               }
 
               // Encryption stuff
@@ -1767,7 +1829,7 @@ void mcapi_poll(mcapiConnection *conn) {
             case CHUNK_DATA_AND_UPDATE_LIGHT:
               mcapiChunkAndLightDataPacket packet = create_chunk_and_light_data_packet(&curr_packet);
               if (conn->chunk_and_light_data_cb) (*conn->chunk_and_light_data_cb)(conn, packet);
-              // TODO: destory_chunk_and_light_data_packet(curr_packet)
+              destory_chunk_and_light_data_packet(packet);
               break;
             case SYNCHRONIZE_PLAYER_POSITION:
               mcapiSynchronizePlayerPositionPacket sync_packet = create_synchronize_player_position_data_packet(&curr_packet);

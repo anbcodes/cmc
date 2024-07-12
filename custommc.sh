@@ -34,7 +34,7 @@ echo "username $USERNAME, uuid $UUID, access_token $ACCESS_TOKEN" > /tmp/args.tx
 
 pushd $(dirname $0)
 
-echo "./build/cmc $USERNAME 0.0.0.0 25565 $UUID $ACCESS_TOKEN" > ./run-with-token.sh
+echo "./build/cmc $USERNAME" '$1' '$2' "$UUID $ACCESS_TOKEN" > ./run-with-token.sh
 
 chmod +x ./run-with-token.sh
 

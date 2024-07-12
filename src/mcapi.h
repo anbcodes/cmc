@@ -29,6 +29,8 @@ void mcapi_print_str(mcapiString str);
 typedef struct mcapiConnection mcapiConnection;
 
 mcapiConnection* mcapi_create_connection(char* hostname, short port, char* uuid, char* access_token);
+void mcapi_destroy_connection(mcapiConnection* conn);
+
 void mcapi_set_state(mcapiConnection* conn, mcapiConnState state);
 mcapiConnState mcapi_get_state(mcapiConnection* conn);
 

@@ -546,8 +546,8 @@ void on_registry(mcapiConnection *conn, mcapiRegistryDataPacket packet) {
       // printf("grass %x %x %x\n", grass[index * 4 + 0], grass[index * 4 + 1], grass[index * 4 + 2]);
       // printf("foliage %x %x %x\n", foliage[index * 4 + 0], foliage[index * 4 + 1], foliage[index * 4 + 2]);
     }
-    // free(grass);
-    // free(foliage);
+    free(grass);
+    free(foliage);
   }
 }
 
@@ -564,6 +564,7 @@ void on_chunk(mcapiConnection *conn, mcapiChunkAndLightDataPacket packet) {
   chunk->x = packet.chunk_x;
   chunk->z = packet.chunk_z;
   for (int i = 0; i < 24; i++) {
+    chunk->sections[i].num_quads = 0;
     chunk->sections[i].x = packet.chunk_x;
     chunk->sections[i].y = i - 4;
     chunk->sections[i].z = packet.chunk_z;
@@ -640,6 +641,8 @@ int add_texture(cJSON *textures, const char *name, unsigned char *texture_sheet,
       texture_sheet[j + 3] = rgba[i + 3];
     }
   }
+
+  free(rgba);
   return texture_id;
 }
 
@@ -743,24 +746,28 @@ int main(int argc, char *argv[]) {
     if (blockstate == NULL) {
       printf("blockstate not found for %s\n", block_name);
       block = block->next;
+      cJSON_Delete(blockstate);
       continue;
     }
     cJSON *multipart = cJSON_GetObjectItemCaseSensitive(blockstate, "multipart");
     if (multipart != NULL) {
       printf("skipping multipart for now: %s\n", block_name);
       block = block->next;
+      cJSON_Delete(blockstate);
       continue;
     }
     cJSON *variants = cJSON_GetObjectItemCaseSensitive(blockstate, "variants");
     if (variants == NULL) {
       printf("variants not found for %s\n", block_name);
       block = block->next;
+      cJSON_Delete(blockstate); 
       continue;
     }
     cJSON *variant = variants->child;
     if (variant == NULL) {
       printf("variant not found for %s\n", block_name);
       block = block->next;
+      cJSON_Delete(blockstate);
       continue;
     }
     if (variant->type == cJSON_Array) {
@@ -771,6 +778,7 @@ int main(int argc, char *argv[]) {
     if (model_name == NULL) {
       printf("model not found for %s\n", block_name);
       block = block->next;
+      cJSON_Delete(blockstate);
       continue;
     }
     char *model_name_str = model_name->valuestring;
@@ -778,6 +786,7 @@ int main(int argc, char *argv[]) {
       model_name_str += 10;
     }
     snprintf(fname, 1000, "data/assets/minecraft/models/%s.json", model_name_str);
+    cJSON_Delete(blockstate);
     cJSON *model = load_json(fname);
     if (model == NULL) {
       printf("model not found for %s\n", block_name);
@@ -813,6 +822,7 @@ int main(int argc, char *argv[]) {
         state = state->next;
       }
     }
+    cJSON_Delete(model);
     block = block->next;
   }
   // save_image("texture_sheet.png", texture_sheet, TEXTURE_SIZE * TEXTURE_TILES, TEXTURE_SIZE * TEXTURE_TILES);
@@ -1470,7 +1480,20 @@ int main(int argc, char *argv[]) {
     wgpuRenderPassEncoderRelease(render_pass_encoder);
     wgpuCommandEncoderRelease(command_encoder);
     wgpuTextureViewRelease(frame);
+    wgpuTextureViewRelease(depth_frame);
     wgpuTextureRelease(surface_texture.texture);
+  }
+
+  // Free chunks
+  for (int i = 0; i < MAX_CHUNKS; i++) {
+    if (game.world.chunks[i] != NULL) {
+      for (int j = 0; j < 24; j++) {
+        if (game.world.chunks[i]->sections[j].num_quads != 0) {
+          wgpuBufferRelease(game.world.chunks[i]->sections[j].vertex_buffer);
+        }
+      }
+      free(game.world.chunks[i]);
+    }
   }
 
   wgpuRenderPipelineRelease(render_pipeline);
@@ -1486,5 +1509,7 @@ int main(int argc, char *argv[]) {
   glfwDestroyWindow(window);
   wgpuInstanceRelease(game.instance);
   glfwTerminate();
+  mcapi_destroy_connection(conn);
+  cJSON_Delete(blocks);
   return 0;
 }
