@@ -357,7 +357,7 @@ mcapiConnection *mcapi_create_connection(char *hostname, short port, char *uuid,
   // Initalize openssl
   OpenSSL_add_all_algorithms();
   ERR_load_crypto_strings();
-  OPENSSL_config(NULL);
+  // OPENSSL_config(NULL);
 
   mcapiConnection *conn = calloc(1, sizeof(mcapiConnection));
   conn->access_token = mcapi_to_string(access_token);
@@ -1097,7 +1097,9 @@ void send_packet(mcapiConnection *conn, const mcapiBuffer packet) {
     // int encrypted_len = 0;
     // EVP_CipherUpdate(conn->encrypt_ctx, NULL, &encrypted_len, rest_of_packet->ptr, rest_of_packet->len);
     // mcapiBuffer encrypted = mcapi_create_buffer(new_packet);
-    EVP_CipherUpdate(conn->encrypt_ctx, new_packet.ptr, &new_packet.len, new_packet.ptr, new_packet.len);
+    int encrypted_len = 0;
+    EVP_CipherUpdate(conn->encrypt_ctx, new_packet.ptr, &encrypted_len, new_packet.ptr, new_packet.len);
+    new_packet.len = encrypted_len;
   }
 
   write(conn->sockfd, new_packet.ptr, new_packet.len);
@@ -1534,9 +1536,11 @@ void mcapi_poll(mcapiConnection *conn) {
 
     if (conn->encryption_enabled) {
       // Decrypt
-      if (1 != EVP_CipherUpdate(conn->decrypt_ctx, readable.buf.ptr, &readable.buf.len, readable.buf.ptr, readable.buf.len)) {
+      int decrypted_len = 0;
+      if (1 != EVP_CipherUpdate(conn->decrypt_ctx, readable.buf.ptr, &decrypted_len, readable.buf.ptr, readable.buf.len)) {
         ERR_print_errors_fp(stderr);
       }
+      readable.buf.len = decrypted_len;
     }
 
     while (readable.cursor < readable.buf.len) {
@@ -1668,14 +1672,14 @@ void mcapi_poll(mcapiConnection *conn) {
               }
               mcapiBuffer pubkey = encrypt_req.publicKey;
               printf("pubkey %p\n", encrypt_req.publicKey.ptr);
-              if (1 != OSSL_DECODER_from_data(decoder_ctx, &pubkey.ptr, &pubkey.len)) ERR_print_errors_fp(stderr);
+              if (1 != OSSL_DECODER_from_data(decoder_ctx, (const unsigned char **)&pubkey.ptr, &pubkey.len)) ERR_print_errors_fp(stderr);
 
               // Encrypt secret (https://www.openssl.org/docs/man3.0/man3/EVP_PKEY_encrypt.html)
               EVP_PKEY_CTX *pkey_ctx = EVP_PKEY_CTX_new(pkey, NULL);
               if (1 != EVP_PKEY_encrypt_init(pkey_ctx)) ERR_print_errors_fp(stderr);
               if (1 != EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_PKCS1_PADDING)) ERR_print_errors_fp(stderr);
 
-              int ss_encrypted_len = 0;
+              size_t ss_encrypted_len = 0;
 
               // Get length
               if (1 != EVP_PKEY_encrypt(pkey_ctx, NULL, &ss_encrypted_len, shared_secret.ptr, shared_secret.len)) ERR_print_errors_fp(stderr);
@@ -1686,7 +1690,7 @@ void mcapi_poll(mcapiConnection *conn) {
 
               // Encrypt token
 
-              int vt_encrypted_len = 0;
+              size_t vt_encrypted_len = 0;
 
               // Get length
               if (1 != EVP_PKEY_encrypt(pkey_ctx, NULL, &vt_encrypted_len, encrypt_req.verifyToken.ptr, encrypt_req.verifyToken.len)) ERR_print_errors_fp(stderr);

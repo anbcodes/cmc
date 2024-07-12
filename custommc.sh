@@ -19,7 +19,7 @@ while [[ $# -gt 0 ]]; do
     --username)
       USERNAME="$2"
       shift # past argument
-      shift # past value 
+      shift # past value
       ;;
     *)
       POSITIONAL_ARGS+=("$1") # save positional arg
@@ -34,7 +34,7 @@ echo "username $USERNAME, uuid $UUID, access_token $ACCESS_TOKEN" > /tmp/args.tx
 
 pushd $(dirname $0)
 
-echo "./cmc $USERNAME 0.0.0.0 27007 $UUID $ACCESS_TOKEN" > ./run-with-token.sh
+echo "./build/cmc $USERNAME 0.0.0.0 25565 $UUID $ACCESS_TOKEN" > ./run-with-token.sh
 
 chmod +x ./run-with-token.sh
 

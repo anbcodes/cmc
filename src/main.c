@@ -1139,46 +1139,6 @@ int main(int argc, char *argv[]) {
     },
   };
 
-  // Create a sample world
-
-  // int n = 0;
-  // for (int cx = -2; cx <= 2; cx += 1) {
-  //   for (int cz = -2; cz <= 2; cz += 1) {
-  //     Chunk *chunk = malloc(sizeof(Chunk));
-  //     game.world.chunks[n] = chunk;
-  //     n += 1;
-  //     chunk->x = cx;
-  //     chunk->z = cz;
-  //     for (int s = 0; s < 24; s += 1) {
-  //       chunk->sections[s].x = cx;
-  //       chunk->sections[s].y = s - 4;
-  //       chunk->sections[s].z = cz;
-  //       for (int x = 0; x < CHUNK_SIZE; x += 1) {
-  //         for (int z = 0; z < CHUNK_SIZE; z += 1) {
-  //           for (int y = 0; y < CHUNK_SIZE; y += 1) {
-  //             float wx = cx * CHUNK_SIZE + x;
-  //             float wy = s * CHUNK_SIZE - 64 + y;
-  //             float wz = cz * CHUNK_SIZE + z;
-  //             double surface = 5.0f * sin(wx / 15.0f) * cos(wz / 15.0f) + 10.0f;
-  //             float material = 0;
-  //             if (wy < surface) {
-  //               material = 1;
-  //               if (wy < surface - 2) {
-  //                 material = 2;
-  //               }
-  //               if (wy < surface - 5) {
-  //                 material = 3;
-  //               }
-  //             }
-  //             chunk->sections[s].data[x + z * CHUNK_SIZE + y * CHUNK_SIZE * CHUNK_SIZE] = material;
-  //           }
-  //         }
-  //       }
-  //     }
-  //   }
-  // }
-  // world_init_new_meshes(&game.world, game.device);
-
   int max_quads = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * 3;
   uint32_t indices[max_quads * 6];
   for (int i = 0; i < max_quads; i += 1) {
