@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e 
+set -e
 set -o pipefail
 
 pushd $(dirname $0) > /dev/null
@@ -18,7 +18,7 @@ if [ ! -d lib/wgpu ]; then
   wget https://github.com/gfx-rs/wgpu-native/releases/download/v0.19.4.1/wgpu-linux-x86_64-debug.zip -O wgpu.zip
   mkdir -p lib/wgpu
   pushd lib/wgpu
-  unzip ../wgpu.zip
+  unzip ../../wgpu.zip
   popd
   rm -rf wgpu.zip
 fi
