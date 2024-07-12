@@ -351,6 +351,9 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           if (tile == 0) {
             tile = info.texture_layer0;
           }
+          if (tile == 0) {
+            tile = info.texture_vine;
+          }
           if (d == 1 && info.texture_end != 0) {
             tile = info.texture_end;
           }

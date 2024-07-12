@@ -20,6 +20,7 @@ typedef struct BlockInfo {
   int16_t texture_overlay;
   int16_t texture_cross;
   int16_t texture_layer0;
+  int16_t texture_vine;
   bool transparent;
   bool passable;
   bool grass;

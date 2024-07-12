@@ -716,7 +716,8 @@ int main(int argc, char *argv[]) {
     cJSON *type = cJSON_GetObjectItemCaseSensitive(definition, "type");
     if (
       strcmp(type->valuestring, "minecraft:air") == 0 ||
-      strcmp(type->valuestring, "minecraft:flower") == 0
+      strcmp(type->valuestring, "minecraft:flower") == 0 ||
+      strcmp(type->valuestring, "minecraft:vine") == 0
     ) {
       info.passable = true;
       info.transparent = true;
@@ -737,45 +738,47 @@ int main(int argc, char *argv[]) {
       info.foliage = true;
     }
 
-    snprintf(fname, 1000, "data/assets/minecraft/models/block/%s.json", block_name);
+    snprintf(fname, 1000, "data/assets/minecraft/blockstates/%s.json", block_name);
+    cJSON *blockstate = load_json(fname);
+    if (blockstate == NULL) {
+      printf("blockstate not found for %s\n", block_name);
+      block = block->next;
+      continue;
+    }
+    cJSON *multipart = cJSON_GetObjectItemCaseSensitive(blockstate, "multipart");
+    if (multipart != NULL) {
+      printf("skipping multipart for now: %s\n", block_name);
+      block = block->next;
+      continue;
+    }
+    cJSON *variants = cJSON_GetObjectItemCaseSensitive(blockstate, "variants");
+    if (variants == NULL) {
+      printf("variants not found for %s\n", block_name);
+      block = block->next;
+      continue;
+    }
+    cJSON *variant = variants->child;
+    if (variant == NULL) {
+      printf("variant not found for %s\n", block_name);
+      block = block->next;
+      continue;
+    }
+    if (variant->type == cJSON_Array) {
+      // Pick first random option for now
+      variant = variant->child;
+    }
+    cJSON *model_name = cJSON_GetObjectItemCaseSensitive(variant, "model");
+    if (model_name == NULL) {
+      printf("model not found for %s\n", block_name);
+      block = block->next;
+      continue;
+    }
+    char *model_name_str = model_name->valuestring;
+    if (strncmp(model_name_str, "minecraft:", 10) == 0) {
+      model_name_str += 10;
+    }
+    snprintf(fname, 1000, "data/assets/minecraft/models/%s.json", model_name_str);
     cJSON *model = load_json(fname);
-    if (model == NULL) {
-      snprintf(fname, 1000, "data/assets/minecraft/models/item/%s.json", block_name);
-      model = load_json(fname);
-    }
-    if (model == NULL) {
-      snprintf(fname, 1000, "data/assets/minecraft/blockstates/%s.json", block_name);
-      cJSON *blockstate = load_json(fname);
-      if (blockstate == NULL) {
-        printf("blockstate not found for %s\n", block_name);
-        block = block->next;
-        continue;
-      }
-      cJSON *variants = cJSON_GetObjectItemCaseSensitive(blockstate, "variants");
-      if (variants == NULL) {
-        printf("variants not found for %s\n", block_name);
-        block = block->next;
-        continue;
-      }
-      cJSON *variant = variants->child;
-      if (variant == NULL) {
-        printf("variant not found for %s\n", block_name);
-        block = block->next;
-        continue;
-      }
-      cJSON *model_name = cJSON_GetObjectItemCaseSensitive(variant, "model");
-      if (model_name == NULL) {
-        printf("model not found for %s\n", block_name);
-        block = block->next;
-        continue;
-      }
-      char *model_name_str = model_name->valuestring;
-      if (strncmp(model_name_str, "minecraft:", 10) == 0) {
-        model_name_str += 10;
-      }
-      snprintf(fname, 1000, "data/assets/minecraft/models/%s.json", model_name_str);
-      model = load_json(fname);
-    }
     if (model == NULL) {
       printf("model not found for %s\n", block_name);
       block = block->next;
@@ -792,6 +795,7 @@ int main(int argc, char *argv[]) {
     info.texture_all = add_texture(textures, "all", texture_sheet, &cur_texture);
     info.texture_cross = add_texture(textures, "cross", texture_sheet, &cur_texture);
     info.texture_layer0 = add_texture(textures, "layer0", texture_sheet, &cur_texture);
+    info.texture_vine = add_texture(textures, "vine", texture_sheet, &cur_texture);
 
     cJSON *states = cJSON_GetObjectItemCaseSensitive(block, "states");
     if (states != NULL) {
