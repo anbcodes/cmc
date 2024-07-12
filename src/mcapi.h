@@ -199,6 +199,14 @@ void mcapi_set_login_success_cb(mcapiConnection* conn, void (*cb)(mcapiConnectio
 
 void mcapi_set_finish_config_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*));
 
+typedef struct mcapiSetBlockDestroyStagePacket {
+  int entity_id;
+  ivec3 position;
+  int8_t stage; // 0–9 to set it, any other value to remove it. 
+} mcapiSetBlockDestroyStagePacket;
+
+void mcapi_set_block_destroy_stage_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiSetBlockDestroyStagePacket));
+
 typedef struct mcapiClientboundKnownPacksPacket {
   int known_pack_count;
   mcapiKnownPack* known_packs;

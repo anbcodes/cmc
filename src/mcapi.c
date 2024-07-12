@@ -80,7 +80,7 @@ typedef enum PacketType {
   ENTITY_ANIMATION = 0x03,                     // Unimplemented
   AWARD_STATISTICS = 0x04,                     // Unimplemented
   ACKNOWLEDGE_BLOCK_CHANGE = 0x05,             // Unimplemented
-  SET_BLOCK_DESTORY_STAGE = 0x06,              // Unimplemented
+  SET_BLOCK_DESTROY_STAGE = 0x06,
   BLOCK_ENTITY_DATA = 0x07,                    // Unimplemented
   BLOCK_ACTION = 0x08,                         // Unimplemented
   BLOCK_UPDATE = 0x09,                         // Unimplemented
@@ -298,6 +298,7 @@ struct mcapiConnection {
   // Init
   void (*login_success_cb)(mcapiConnection *, mcapiLoginSuccessPacket);
   void (*finish_config_cb)(mcapiConnection *);
+  void (*set_block_destroy_stage_cb)(mcapiConnection*, mcapiSetBlockDestroyStagePacket);
   void (*clientbound_known_packs_cb)(mcapiConnection *, mcapiClientboundKnownPacksPacket);
   void (*registry_data_cb)(mcapiConnection *, mcapiRegistryDataPacket);
   void (*chunk_and_light_data_cb)(mcapiConnection *, mcapiChunkAndLightDataPacket);
@@ -885,6 +886,13 @@ mcapiUUID read_uuid(ReadableBuffer *io) {
   return uuid;
 }
 
+void read_ipos_into(ReadableBuffer *io, ivec3 pos) {
+  uint64_t packed = read_ulong(io);
+  pos[0] = packed >> 38;
+  pos[1] = packed & 0xFFF;
+  pos[2] = packed & 0x3ffffff000 >> 12;
+}
+
 /*
 // Decompress the block array
 int compressed_blocks_len = ntohl(*(uint32_t *)(compressed_blocks));
@@ -1330,8 +1338,16 @@ mcapiLoginSuccessPacket create_login_success_packet(ReadableBuffer *p) {
   return res;
 }
 
-void destory_login_success_packet(mcapiLoginSuccessPacket p) {
+void destroy_login_success_packet(mcapiLoginSuccessPacket p) {
   free(p.properties);
+}
+
+mcapiSetBlockDestroyStagePacket read_set_block_destroy_stage_packet(ReadableBuffer *p) {
+  mcapiSetBlockDestroyStagePacket res = {};
+  res.entity_id = read_varint(p);
+  read_ipos_into(p, res.position);
+  res.stage = read_byte(p);
+  return res;
 }
 
 mcapiClientboundKnownPacksPacket create_clientbound_known_packs_packet(ReadableBuffer *p) {
@@ -1524,7 +1540,7 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
   return res;
 }
 
-void destory_chunk_and_light_data_packet(mcapiChunkAndLightDataPacket p) {
+void destroy_chunk_and_light_data_packet(mcapiChunkAndLightDataPacket p) {
   mcapi_destroy_nbt(p.heightmaps);
   free(p.chunk_sections);
   for (int i = 0; i < p.block_entity_count; i++) {
@@ -1564,6 +1580,7 @@ mcapiUpdateTimePacket create_update_time_packet(ReadableBuffer *p) {
 
 mcapi_setcb_func(login_success, mcapiLoginSuccessPacket);
 mcapi_setcb_func1(finish_config);
+mcapi_setcb_func(set_block_destroy_stage, mcapiSetBlockDestroyStagePacket);
 mcapi_setcb_func(clientbound_known_packs, mcapiClientboundKnownPacksPacket);
 mcapi_setcb_func(registry_data, mcapiRegistryDataPacket);
 mcapi_setcb_func(chunk_and_light_data, mcapiChunkAndLightDataPacket);
@@ -1785,7 +1802,7 @@ void mcapi_poll(mcapiConnection *conn) {
             case LOGIN_SUCCESS:
               mcapiLoginSuccessPacket packet = create_login_success_packet(&curr_packet);
               if (conn->login_success_cb) (*conn->login_success_cb)(conn, packet);
-              destory_login_success_packet(packet);
+              destroy_login_success_packet(packet);
               break;
             default:
               printf("Unknown login packet %02x (len %ld)\n", type, curr_packet.buf.len);
@@ -1826,10 +1843,14 @@ void mcapi_poll(mcapiConnection *conn) {
 
         } else if (conn->state == MCAPI_STATE_PLAY) {
           switch (type) {
+            case SET_BLOCK_DESTROY_STAGE:
+              mcapiSetBlockDestroyStagePacket sbds_packet = read_set_block_destroy_stage_packet(&curr_packet);
+              if (conn->set_block_destroy_stage_cb) (*conn->set_block_destroy_stage_cb)(conn, sbds_packet);
+              break;
             case CHUNK_DATA_AND_UPDATE_LIGHT:
-              mcapiChunkAndLightDataPacket packet = create_chunk_and_light_data_packet(&curr_packet);
-              if (conn->chunk_and_light_data_cb) (*conn->chunk_and_light_data_cb)(conn, packet);
-              destory_chunk_and_light_data_packet(packet);
+              mcapiChunkAndLightDataPacket chunk_packet = create_chunk_and_light_data_packet(&curr_packet);
+              if (conn->chunk_and_light_data_cb) (*conn->chunk_and_light_data_cb)(conn, chunk_packet);
+              destroy_chunk_and_light_data_packet(chunk_packet);
               break;
             case SYNCHRONIZE_PLAYER_POSITION:
               mcapiSynchronizePlayerPositionPacket sync_packet = create_synchronize_player_position_data_packet(&curr_packet);
