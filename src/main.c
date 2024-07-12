@@ -1487,12 +1487,7 @@ int main(int argc, char *argv[]) {
   // Free chunks
   for (int i = 0; i < MAX_CHUNKS; i++) {
     if (game.world.chunks[i] != NULL) {
-      for (int j = 0; j < 24; j++) {
-        if (game.world.chunks[i]->sections[j].num_quads != 0) {
-          wgpuBufferRelease(game.world.chunks[i]->sections[j].vertex_buffer);
-        }
-      }
-      free(game.world.chunks[i]);
+      chunk_destroy(game.world.chunks[i]);
     }
   }
 

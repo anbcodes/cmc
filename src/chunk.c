@@ -29,13 +29,31 @@ Chunk *world_chunk(World *world, int x, int z) {
   return NULL;
 }
 
+void chunk_destroy(Chunk *chunk) {
+  for (int j = 0; j < 24; j++) {
+    if (chunk->sections[j].num_quads != 0) {
+      wgpuBufferRelease(chunk->sections[j].vertex_buffer);
+    }
+  }
+  free(chunk);
+}
+
 int world_add_chunk(World *world, Chunk *chunk) {
+  for (int i = 0; i < MAX_CHUNKS; i += 1) {
+    if (world->chunks[i] != NULL && world->chunks[i]->x == chunk->x && world->chunks[i]->z == chunk->z) {
+      chunk_destroy(world->chunks[i]);
+      world->chunks[i] = chunk;
+      return i;
+    }
+  }
+
   for (int i = 0; i < MAX_CHUNKS; i += 1) {
     if (world->chunks[i] == NULL) {
       world->chunks[i] = chunk;
       return i;
     }
   }
+
   printf("No space for chunk\n");
   assert(false);
   return -1;
