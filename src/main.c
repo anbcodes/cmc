@@ -80,6 +80,7 @@ typedef struct Game {
   World world;
   mcapiConnection *conn;
   unsigned char texture_sheet[TEXTURE_SIZE * TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_TILES * 4];
+  cJSON *blocks;
 } Game;
 
 Game game = {
@@ -976,67 +977,13 @@ void init_chunk_renderer() {
   };
 }
 
-int main(int argc, char *argv[]) {
-  if (argc < 6) {
-    perror("Usage: cmc [username] [server ip] [port] [uuid] [access_token]\n");
-    exit(1);
-  }
-
-  char *username = argv[1];
-  char *server_ip = argv[2];
-  long long _port = strtol(argv[3], NULL, 10);
-  char *uuid = argv[4];
-  char *access_token = argv[5];
-
-  if (_port < 1 || _port > 65535) {
-    perror("Invalid port. Must be between 1 and 65535\n");
-    exit(1);
-  }
-
-  unsigned short port = _port;
-
-  frmwrk_setup_logging(WGPULogLevel_Warn);
-
-  mcapiConnection *conn = mcapi_create_connection(server_ip, port, uuid, access_token);
-  game.conn = conn;
-
-  mcapi_send_handshake(
-    conn,
-    (mcapiHandshakePacket){
-      .protocol_version = 767,
-      .server_addr = server_ip,
-      .server_port = port,
-      .next_state = 2,
-    }
-  );
-
-  mcapi_send_login_start(
-    conn,
-    (mcapiLoginStartPacket){
-      .username = mcapi_to_string(username),
-      .uuid = (mcapiUUID){
-        .upper = 0,
-        .lower = 0,
-      },
-    }
-  );
-
-  mcapi_set_state(conn, MCAPI_STATE_LOGIN);
-
-  mcapi_set_login_success_cb(conn, on_login_success);
-  mcapi_set_clientbound_known_packs_cb(conn, on_known_packs);
-  mcapi_set_finish_config_cb(conn, on_finish_config);
-  mcapi_set_chunk_and_light_data_cb(conn, on_chunk);
-  mcapi_set_synchronize_player_position_cb(conn, on_position);
-  mcapi_set_registry_data_cb(conn, on_registry);
-  mcapi_set_update_time_cb(conn, on_update_time);
-
+void load_block_models() {
   int num_id = 0;
   int max_id = -1;
   int cur_texture = 1;
   char fname[1000];
-  cJSON *blocks = load_json("data/blocks.json");
-  cJSON *block = blocks->child;
+  game.blocks = load_json("data/blocks.json");
+  cJSON *block = game.blocks->child;
   while (block != NULL) {
     BlockInfo info = {0};
     char *block_name = block->string;
@@ -1155,6 +1102,64 @@ int main(int argc, char *argv[]) {
     block = block->next;
   }
   // save_image("texture_sheet.png", texture_sheet, TEXTURE_SIZE * TEXTURE_TILES, TEXTURE_SIZE * TEXTURE_TILES);
+}
+
+int main(int argc, char *argv[]) {
+  if (argc < 6) {
+    perror("Usage: cmc [username] [server ip] [port] [uuid] [access_token]\n");
+    exit(1);
+  }
+
+  char *username = argv[1];
+  char *server_ip = argv[2];
+  long long _port = strtol(argv[3], NULL, 10);
+  char *uuid = argv[4];
+  char *access_token = argv[5];
+
+  if (_port < 1 || _port > 65535) {
+    perror("Invalid port. Must be between 1 and 65535\n");
+    exit(1);
+  }
+
+  unsigned short port = _port;
+
+  frmwrk_setup_logging(WGPULogLevel_Warn);
+
+  mcapiConnection *conn = mcapi_create_connection(server_ip, port, uuid, access_token);
+  game.conn = conn;
+
+  mcapi_send_handshake(
+    conn,
+    (mcapiHandshakePacket){
+      .protocol_version = 767,
+      .server_addr = server_ip,
+      .server_port = port,
+      .next_state = 2,
+    }
+  );
+
+  mcapi_send_login_start(
+    conn,
+    (mcapiLoginStartPacket){
+      .username = mcapi_to_string(username),
+      .uuid = (mcapiUUID){
+        .upper = 0,
+        .lower = 0,
+      },
+    }
+  );
+
+  mcapi_set_state(conn, MCAPI_STATE_LOGIN);
+
+  mcapi_set_login_success_cb(conn, on_login_success);
+  mcapi_set_clientbound_known_packs_cb(conn, on_known_packs);
+  mcapi_set_finish_config_cb(conn, on_finish_config);
+  mcapi_set_chunk_and_light_data_cb(conn, on_chunk);
+  mcapi_set_synchronize_player_position_cb(conn, on_position);
+  mcapi_set_registry_data_cb(conn, on_registry);
+  mcapi_set_update_time_cb(conn, on_update_time);
+
+  load_block_models();
 
   game.instance = wgpuCreateInstance(NULL);
   assert(game.instance);
@@ -1509,12 +1514,11 @@ int main(int argc, char *argv[]) {
   wgpuDeviceRelease(game.device);
   wgpuAdapterRelease(game.adapter);
   wgpuSurfaceRelease(game.surface);
-  // chunk_release(chunk);
   wgpuBufferRelease(game.uniform_buffer);
   glfwDestroyWindow(window);
   wgpuInstanceRelease(game.instance);
   glfwTerminate();
   mcapi_destroy_connection(conn);
-  cJSON_Delete(blocks);
+  cJSON_Delete(game.blocks);
   return 0;
 }
