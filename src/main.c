@@ -35,14 +35,29 @@ const float COLLISION_EPSILON = 0.001f;
 const float TURN_SPEED = 0.002f;
 const float TICKS_PER_SECOND = 20.0f;
 
+typedef struct Uniforms {
+  mat4 view;
+  mat4 projection;
+  float internal_sky_max;
+} Uniforms;
+
 typedef struct Game {
   WGPUInstance instance;
   WGPUSurface surface;
+  WGPUSurfaceCapabilities surface_capabilities;
   WGPUAdapter adapter;
   WGPUDevice device;
+  WGPUQueue queue;
   WGPUSurfaceConfiguration config;
   WGPUTextureDescriptor depth_texture_descriptor;
   WGPUTexture depth_texture;
+  WGPUBuffer index_buffer;
+  WGPUBindGroup bind_group;
+  WGPURenderPipeline render_pipeline;
+  WGPUBuffer uniform_buffer;
+  Uniforms uniforms;
+  WGPUPipelineLayout pipeline_layout;
+  WGPUShaderModule shader_module;
   float eye_height;
   vec3 size;
   bool keys[GLFW_KEY_LAST + 1];
@@ -64,6 +79,7 @@ typedef struct Game {
   long time_of_day;
   World world;
   mcapiConnection *conn;
+  unsigned char texture_sheet[TEXTURE_SIZE * TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_TILES * 4];
 } Game;
 
 Game game = {
@@ -76,12 +92,6 @@ Game game = {
   .eye_height = 1.62,
   .size = {0.6, 1.8, 0.6},
 };
-
-typedef struct Uniforms {
-  mat4 view;
-  mat4 projection;
-  float internal_sky_max;
-} Uniforms;
 
 unsigned char *load_image(const char *filename, unsigned *width, unsigned *height) {
   unsigned char *png = 0;
@@ -646,6 +656,326 @@ int add_texture(cJSON *textures, const char *name, unsigned char *texture_sheet,
   return texture_id;
 }
 
+void init_chunk_renderer() {
+  game.shader_module =
+    frmwrk_load_shader_module(game.device, "shader.wgsl");
+  assert(game.shader_module);
+
+  // unsigned int texture_width;
+  // unsigned int texture_height;
+  // unsigned char *image_data = load_image("texture-2.png", &texture_width, &texture_height);
+
+  WGPUTextureDescriptor texture_descriptor = {
+    .usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding,
+    .dimension = WGPUTextureDimension_2D,
+    .size = {
+      .width = TEXTURE_SIZE * TEXTURE_TILES,
+      .height = TEXTURE_SIZE * TEXTURE_TILES,
+      .depthOrArrayLayers = 1,
+    },
+    .format = WGPUTextureFormat_RGBA8UnormSrgb,
+    .mipLevelCount = 1,
+    .sampleCount = 1,
+    .viewFormatCount = 0,
+    .viewFormats = NULL,
+  };
+  WGPUTexture texture = wgpuDeviceCreateTexture(game.device, &texture_descriptor);
+
+  // Create the texture view.
+  WGPUTextureViewDescriptor textureViewDescriptor = {
+    .format = WGPUTextureFormat_RGBA8UnormSrgb,
+    .dimension = WGPUTextureViewDimension_2D,
+    .aspect = WGPUTextureAspect_All,
+    .mipLevelCount = 1,
+    .arrayLayerCount = 1,
+  };
+  WGPUTextureView texture_view = wgpuTextureCreateView(texture, &textureViewDescriptor);
+
+  WGPUSampler texture_sampler = wgpuDeviceCreateSampler(
+    game.device,
+    &(WGPUSamplerDescriptor){
+      .addressModeU = WGPUAddressMode_Repeat,
+      .addressModeV = WGPUAddressMode_Repeat,
+      .addressModeW = WGPUAddressMode_Repeat,
+      .magFilter = WGPUFilterMode_Nearest,
+      .minFilter = WGPUFilterMode_Nearest,
+      .mipmapFilter = WGPUFilterMode_Nearest,
+      .maxAnisotropy = 1,
+    }
+  );
+
+  WGPUBuffer buffer = frmwrk_device_create_buffer_init(
+    game.device,
+    &(const frmwrk_buffer_init_descriptor){
+      .label = "Texture Buffer",
+      .content = (void *)game.texture_sheet,
+      .content_size = TEXTURE_SIZE * TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_TILES * 4,
+      .usage = WGPUBufferUsage_CopySrc,
+    }
+  );
+
+  WGPUImageCopyBuffer image_copy_buffer = {
+    .buffer = buffer,
+    .layout = {
+      .bytesPerRow = TEXTURE_SIZE * TEXTURE_TILES * 4,
+      .rowsPerImage = TEXTURE_SIZE * TEXTURE_TILES,
+    },
+  };
+  WGPUImageCopyTexture image_copy_texture = {
+    .texture = texture,
+  };
+  WGPUExtent3D copy_size = {
+    .width = TEXTURE_SIZE * TEXTURE_TILES,
+    .height = TEXTURE_SIZE * TEXTURE_TILES,
+    .depthOrArrayLayers = 1,
+  };
+
+  WGPUTextureDataLayout texture_data_layout = {
+    .offset = 0,
+    .bytesPerRow = TEXTURE_SIZE * TEXTURE_TILES * 4,
+    .rowsPerImage = TEXTURE_SIZE * TEXTURE_TILES,
+  };
+
+  size_t dataSize = TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_SIZE * TEXTURE_TILES * 4;
+
+  wgpuQueueWriteTexture(
+    game.queue,
+    &image_copy_texture,
+    game.texture_sheet,
+    dataSize,
+    &texture_data_layout,
+    &copy_size
+  );
+
+  glm_mat4_identity(game.uniforms.view);
+  glm_mat4_identity(game.uniforms.projection);
+
+  game.uniform_buffer = frmwrk_device_create_buffer_init(
+    game.device,
+    &(const frmwrk_buffer_init_descriptor){
+      .label = "Uniform Buffer",
+      .content = (void *)&game.uniforms,
+      .content_size = sizeof(game.uniforms),
+      .usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst,
+    }
+  );
+
+  WGPUBindGroupLayoutEntry bgl_entries[] = {
+    [0] = {
+      .binding = 0,
+      .visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment,
+      .buffer = {
+        .type = WGPUBufferBindingType_Uniform,
+      },
+    },
+    [1] = {
+      .binding = 1,
+      .visibility = WGPUShaderStage_Fragment,
+      .texture = {
+        .sampleType = WGPUTextureSampleType_Float,
+        .viewDimension = WGPUTextureViewDimension_2D,
+        .multisampled = false,
+      },
+    },
+    [2] = {
+      .binding = 2,
+      .visibility = WGPUShaderStage_Fragment,
+      .sampler = {
+        .type = WGPUSamplerBindingType_Filtering,
+      },
+    },
+  };
+
+  WGPUBindGroupLayoutDescriptor bgl_desc = {
+    .entryCount = sizeof(bgl_entries) / sizeof(bgl_entries[0]),
+    .entries = bgl_entries,
+  };
+
+  WGPUBindGroupLayout bgl = wgpuDeviceCreateBindGroupLayout(game.device, &bgl_desc);
+
+  WGPUBindGroupEntry bg_entries[] = {
+    [0] = {
+      .binding = 0,
+      .buffer = game.uniform_buffer,
+      .size = sizeof(game.uniforms),
+    },
+    [1] = {
+      .binding = 1,
+      .textureView = texture_view,
+    },
+    [2] = {
+      .binding = 2,
+      .sampler = texture_sampler,
+    },
+  };
+  WGPUBindGroupDescriptor bg_desc = {
+    .layout = bgl,
+    .entryCount = sizeof(bg_entries) / sizeof(bg_entries[0]),
+    .entries = bg_entries,
+  };
+  game.bind_group = wgpuDeviceCreateBindGroup(game.device, &bg_desc);
+
+  static const WGPUVertexAttribute vertex_attributes[] = {
+    {
+      .format = WGPUVertexFormat_Float32x3,
+      .offset = 0,
+      .shaderLocation = 0,
+    },
+    {
+      .format = WGPUVertexFormat_Float32x4,
+      .offset = 12,
+      .shaderLocation = 1,
+    },
+    {
+      .format = WGPUVertexFormat_Float32x2,
+      .offset = 12 + 16,
+      .shaderLocation = 2,
+    },
+    {
+      .format = WGPUVertexFormat_Float32,
+      .offset = 12 + 16 + 8,
+      .shaderLocation = 3,
+    },
+    {
+      .format = WGPUVertexFormat_Float32,
+      .offset = 12 + 16 + 8 + 4,
+      .shaderLocation = 4,
+    },
+    {
+      .format = WGPUVertexFormat_Float32,
+      .offset = 12 + 16 + 8 + 4 + 4,
+      .shaderLocation = 5,
+    },
+    {
+      .format = WGPUVertexFormat_Float32,
+      .offset = 12 + 16 + 8 + 4 + 4 + 4,
+      .shaderLocation = 6,
+    },
+    {
+      .format = WGPUVertexFormat_Float32,
+      .offset = 12 + 16 + 8 + 4 + 4 + 4 + 4,
+      .shaderLocation = 7,
+    },
+  };
+
+  int max_quads = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * 3;
+  uint32_t indices[max_quads * 6];
+  for (int i = 0; i < max_quads; i += 1) {
+    int offset = i * 6;
+    int base = i * 4;
+    indices[offset + 0] = base + 0;
+    indices[offset + 1] = base + 1;
+    indices[offset + 2] = base + 2;
+    indices[offset + 3] = base + 2;
+    indices[offset + 4] = base + 3;
+    indices[offset + 5] = base + 0;
+  }
+  int index_count = sizeof(indices) / sizeof(indices[0]);
+
+  game.index_buffer = frmwrk_device_create_buffer_init(
+    game.device,
+    &(const frmwrk_buffer_init_descriptor){
+      .label = "index_buffer",
+      .content = (void *)indices,
+      .content_size = sizeof(indices),
+      .usage = WGPUBufferUsage_Index,
+    }
+  );
+
+  game.pipeline_layout = wgpuDeviceCreatePipelineLayout(
+    game.device,
+    &(const WGPUPipelineLayoutDescriptor){
+      .label = "game.pipeline_layout",
+      .bindGroupLayoutCount = 1,
+      .bindGroupLayouts = (const WGPUBindGroupLayout[]){
+        bgl,
+      },
+    }
+  );
+  assert(game.pipeline_layout);
+
+  wgpuSurfaceGetCapabilities(game.surface, game.adapter, &game.surface_capabilities);
+
+  WGPUTextureFormat surface_format = game.surface_capabilities.formats[0];
+
+  game.render_pipeline = wgpuDeviceCreateRenderPipeline(
+    game.device,
+    &(const WGPURenderPipelineDescriptor){
+      .label = "game.render_pipeline",
+      .layout = game.pipeline_layout,
+      .vertex = (const WGPUVertexState){
+        .module = game.shader_module,
+        .entryPoint = "vs_main",
+        .bufferCount = 1,
+        .buffers = (const WGPUVertexBufferLayout[]){
+          (const WGPUVertexBufferLayout){
+            .arrayStride = FLOATS_PER_VERTEX * sizeof(float),
+            .stepMode = WGPUVertexStepMode_Vertex,
+            .attributeCount = sizeof(vertex_attributes) /
+                              sizeof(vertex_attributes[0]),
+            .attributes = vertex_attributes,
+          },
+        },
+      },
+      .fragment = &(const WGPUFragmentState){
+        .module = game.shader_module,
+        .entryPoint = "fs_main",
+        .targetCount = 1,
+        .targets = (const WGPUColorTargetState[]){
+          (const WGPUColorTargetState){
+            .format = surface_format,
+            .writeMask = WGPUColorWriteMask_All,
+          },
+        },
+      },
+      .primitive = (const WGPUPrimitiveState){
+        .topology = WGPUPrimitiveTopology_TriangleList,
+      },
+      .multisample = (const WGPUMultisampleState){
+        .count = 1,
+        .mask = 0xFFFFFFFF,
+      },
+      .depthStencil = &(WGPUDepthStencilState){
+        .depthWriteEnabled = true,
+        .depthCompare = WGPUCompareFunction_Less,
+        .format = WGPUTextureFormat_Depth24Plus,
+        .stencilBack = (WGPUStencilFaceState){
+          .compare = WGPUCompareFunction_Always,
+          .failOp = WGPUStencilOperation_Replace,
+          .depthFailOp = WGPUStencilOperation_Replace,
+          .passOp = WGPUStencilOperation_Replace,
+        },
+        .stencilFront = (WGPUStencilFaceState){
+          .compare = WGPUCompareFunction_Always,
+          .failOp = WGPUStencilOperation_Replace,
+          .depthFailOp = WGPUStencilOperation_Replace,
+          .passOp = WGPUStencilOperation_Replace,
+        },
+      },
+    }
+  );
+  assert(game.render_pipeline);
+
+  game.config = (const WGPUSurfaceConfiguration){
+    .device = game.device,
+    .usage = WGPUTextureUsage_RenderAttachment,
+    .format = surface_format,
+    .presentMode = WGPUPresentMode_Fifo,
+    .alphaMode = game.surface_capabilities.alphaModes[0],
+  };
+
+  game.depth_texture_descriptor = (WGPUTextureDescriptor){
+    .usage = WGPUTextureUsage_RenderAttachment,
+    .dimension = WGPUTextureDimension_2D,
+    .size = {
+      .depthOrArrayLayers = 1,
+    },
+    .format = WGPUTextureFormat_Depth24Plus,
+    .mipLevelCount = 1,
+    .sampleCount = 1,
+  };
+}
+
 int main(int argc, char *argv[]) {
   if (argc < 6) {
     perror("Usage: cmc [username] [server ip] [port] [uuid] [access_token]\n");
@@ -707,7 +1037,6 @@ int main(int argc, char *argv[]) {
   char fname[1000];
   cJSON *blocks = load_json("data/blocks.json");
   cJSON *block = blocks->child;
-  unsigned char texture_sheet[TEXTURE_SIZE * TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_TILES * 4] = {0};
   while (block != NULL) {
     BlockInfo info = {0};
     char *block_name = block->string;
@@ -760,7 +1089,7 @@ int main(int argc, char *argv[]) {
     if (variants == NULL) {
       printf("variants not found for %s\n", block_name);
       block = block->next;
-      cJSON_Delete(blockstate); 
+      cJSON_Delete(blockstate);
       continue;
     }
     cJSON *variant = variants->child;
@@ -795,16 +1124,16 @@ int main(int argc, char *argv[]) {
     }
     cJSON *textures = cJSON_GetObjectItemCaseSensitive(model, "textures");
 
-    info.texture = add_texture(textures, "texture", texture_sheet, &cur_texture);
-    info.texture_bottom = add_texture(textures, "bottom", texture_sheet, &cur_texture);
-    info.texture_top = add_texture(textures, "top", texture_sheet, &cur_texture);
-    info.texture_end = add_texture(textures, "end", texture_sheet, &cur_texture);
-    info.texture_side = add_texture(textures, "side", texture_sheet, &cur_texture);
-    info.texture_overlay = add_texture(textures, "overlay", texture_sheet, &cur_texture);
-    info.texture_all = add_texture(textures, "all", texture_sheet, &cur_texture);
-    info.texture_cross = add_texture(textures, "cross", texture_sheet, &cur_texture);
-    info.texture_layer0 = add_texture(textures, "layer0", texture_sheet, &cur_texture);
-    info.texture_vine = add_texture(textures, "vine", texture_sheet, &cur_texture);
+    info.texture = add_texture(textures, "texture", game.texture_sheet, &cur_texture);
+    info.texture_bottom = add_texture(textures, "bottom", game.texture_sheet, &cur_texture);
+    info.texture_top = add_texture(textures, "top", game.texture_sheet, &cur_texture);
+    info.texture_end = add_texture(textures, "end", game.texture_sheet, &cur_texture);
+    info.texture_side = add_texture(textures, "side", game.texture_sheet, &cur_texture);
+    info.texture_overlay = add_texture(textures, "overlay", game.texture_sheet, &cur_texture);
+    info.texture_all = add_texture(textures, "all", game.texture_sheet, &cur_texture);
+    info.texture_cross = add_texture(textures, "cross", game.texture_sheet, &cur_texture);
+    info.texture_layer0 = add_texture(textures, "layer0", game.texture_sheet, &cur_texture);
+    info.texture_vine = add_texture(textures, "vine", game.texture_sheet, &cur_texture);
 
     cJSON *states = cJSON_GetObjectItemCaseSensitive(block, "states");
     if (states != NULL) {
@@ -947,329 +1276,10 @@ int main(int argc, char *argv[]) {
   wgpuAdapterRequestDevice(game.adapter, NULL, handle_request_device, &game);
   assert(game.device);
 
-  WGPUQueue queue = wgpuDeviceGetQueue(game.device);
-  assert(queue);
+  game.queue = wgpuDeviceGetQueue(game.device);
+  assert(game.queue);
 
-  WGPUShaderModule shader_module =
-    frmwrk_load_shader_module(game.device, "shader.wgsl");
-  assert(shader_module);
-
-  // unsigned int texture_width;
-  // unsigned int texture_height;
-  // unsigned char *image_data = load_image("texture-2.png", &texture_width, &texture_height);
-
-  WGPUTextureDescriptor texture_descriptor = {
-    .usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding,
-    .dimension = WGPUTextureDimension_2D,
-    .size = {
-      .width = TEXTURE_SIZE * TEXTURE_TILES,
-      .height = TEXTURE_SIZE * TEXTURE_TILES,
-      .depthOrArrayLayers = 1,
-    },
-    .format = WGPUTextureFormat_RGBA8UnormSrgb,
-    .mipLevelCount = 1,
-    .sampleCount = 1,
-    .viewFormatCount = 0,
-    .viewFormats = NULL,
-  };
-  WGPUTexture texture = wgpuDeviceCreateTexture(game.device, &texture_descriptor);
-
-  // Create the texture view.
-  WGPUTextureViewDescriptor textureViewDescriptor = {
-    .format = WGPUTextureFormat_RGBA8UnormSrgb,
-    .dimension = WGPUTextureViewDimension_2D,
-    .aspect = WGPUTextureAspect_All,
-    .mipLevelCount = 1,
-    .arrayLayerCount = 1,
-  };
-  WGPUTextureView texture_view = wgpuTextureCreateView(texture, &textureViewDescriptor);
-
-  WGPUSampler texture_sampler = wgpuDeviceCreateSampler(
-    game.device,
-    &(WGPUSamplerDescriptor){
-      .addressModeU = WGPUAddressMode_Repeat,
-      .addressModeV = WGPUAddressMode_Repeat,
-      .addressModeW = WGPUAddressMode_Repeat,
-      .magFilter = WGPUFilterMode_Nearest,
-      .minFilter = WGPUFilterMode_Nearest,
-      .mipmapFilter = WGPUFilterMode_Nearest,
-      .maxAnisotropy = 1,
-    }
-  );
-
-  WGPUBuffer buffer = frmwrk_device_create_buffer_init(
-    game.device,
-    &(const frmwrk_buffer_init_descriptor){
-      .label = "Texture Buffer",
-      .content = (void *)texture_sheet,
-      .content_size = TEXTURE_SIZE * TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_TILES * 4,
-      .usage = WGPUBufferUsage_CopySrc,
-    }
-  );
-
-  WGPUImageCopyBuffer image_copy_buffer = {
-    .buffer = buffer,
-    .layout = {
-      .bytesPerRow = TEXTURE_SIZE * TEXTURE_TILES * 4,
-      .rowsPerImage = TEXTURE_SIZE * TEXTURE_TILES,
-    },
-  };
-  WGPUImageCopyTexture image_copy_texture = {
-    .texture = texture,
-  };
-  WGPUExtent3D copy_size = {
-    .width = TEXTURE_SIZE * TEXTURE_TILES,
-    .height = TEXTURE_SIZE * TEXTURE_TILES,
-    .depthOrArrayLayers = 1,
-  };
-
-  WGPUTextureDataLayout texture_data_layout = {
-    .offset = 0,
-    .bytesPerRow = TEXTURE_SIZE * TEXTURE_TILES * 4,
-    .rowsPerImage = TEXTURE_SIZE * TEXTURE_TILES,
-  };
-
-  size_t dataSize = TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_SIZE * TEXTURE_TILES * 4;
-
-  wgpuQueueWriteTexture(
-    queue,
-    &image_copy_texture,
-    texture_sheet,
-    dataSize,
-    &texture_data_layout,
-    &copy_size
-  );
-
-  Uniforms uniforms = {
-    .view = GLM_MAT4_IDENTITY_INIT,
-    .projection = GLM_MAT4_IDENTITY_INIT,
-  };
-
-  WGPUBuffer uniform_buffer = frmwrk_device_create_buffer_init(
-    game.device,
-    &(const frmwrk_buffer_init_descriptor){
-      .label = "Uniform Buffer",
-      .content = (void *)&uniforms,
-      .content_size = sizeof(uniforms),
-      .usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst,
-    }
-  );
-
-  WGPUBindGroupLayoutEntry bgl_entries[] = {
-    [0] = {
-      .binding = 0,
-      .visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment,
-      .buffer = {
-        .type = WGPUBufferBindingType_Uniform,
-      },
-    },
-    [1] = {
-      .binding = 1,
-      .visibility = WGPUShaderStage_Fragment,
-      .texture = {
-        .sampleType = WGPUTextureSampleType_Float,
-        .viewDimension = WGPUTextureViewDimension_2D,
-        .multisampled = false,
-      },
-    },
-    [2] = {
-      .binding = 2,
-      .visibility = WGPUShaderStage_Fragment,
-      .sampler = {
-        .type = WGPUSamplerBindingType_Filtering,
-      },
-    },
-  };
-
-  WGPUBindGroupLayoutDescriptor bgl_desc = {
-    .entryCount = sizeof(bgl_entries) / sizeof(bgl_entries[0]),
-    .entries = bgl_entries,
-  };
-
-  WGPUBindGroupLayout bgl = wgpuDeviceCreateBindGroupLayout(game.device, &bgl_desc);
-
-  WGPUBindGroupEntry bg_entries[] = {
-    [0] = {
-      .binding = 0,
-      .buffer = uniform_buffer,
-      .size = sizeof(uniforms),
-    },
-    [1] = {
-      .binding = 1,
-      .textureView = texture_view,
-    },
-    [2] = {
-      .binding = 2,
-      .sampler = texture_sampler,
-    },
-  };
-  WGPUBindGroupDescriptor bg_desc = {
-    .layout = bgl,
-    .entryCount = sizeof(bg_entries) / sizeof(bg_entries[0]),
-    .entries = bg_entries,
-  };
-  WGPUBindGroup bg = wgpuDeviceCreateBindGroup(game.device, &bg_desc);
-
-  static const WGPUVertexAttribute vertex_attributes[] = {
-    {
-      .format = WGPUVertexFormat_Float32x3,
-      .offset = 0,
-      .shaderLocation = 0,
-    },
-    {
-      .format = WGPUVertexFormat_Float32x4,
-      .offset = 12,
-      .shaderLocation = 1,
-    },
-    {
-      .format = WGPUVertexFormat_Float32x2,
-      .offset = 12 + 16,
-      .shaderLocation = 2,
-    },
-    {
-      .format = WGPUVertexFormat_Float32,
-      .offset = 12 + 16 + 8,
-      .shaderLocation = 3,
-    },
-    {
-      .format = WGPUVertexFormat_Float32,
-      .offset = 12 + 16 + 8 + 4,
-      .shaderLocation = 4,
-    },
-    {
-      .format = WGPUVertexFormat_Float32,
-      .offset = 12 + 16 + 8 + 4 + 4,
-      .shaderLocation = 5,
-    },
-    {
-      .format = WGPUVertexFormat_Float32,
-      .offset = 12 + 16 + 8 + 4 + 4 + 4,
-      .shaderLocation = 6,
-    },
-    {
-      .format = WGPUVertexFormat_Float32,
-      .offset = 12 + 16 + 8 + 4 + 4 + 4 + 4,
-      .shaderLocation = 7,
-    },
-  };
-
-  int max_quads = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE * 3;
-  uint32_t indices[max_quads * 6];
-  for (int i = 0; i < max_quads; i += 1) {
-    int offset = i * 6;
-    int base = i * 4;
-    indices[offset + 0] = base + 0;
-    indices[offset + 1] = base + 1;
-    indices[offset + 2] = base + 2;
-    indices[offset + 3] = base + 2;
-    indices[offset + 4] = base + 3;
-    indices[offset + 5] = base + 0;
-  }
-  int index_count = sizeof(indices) / sizeof(indices[0]);
-
-  WGPUBuffer index_buffer = frmwrk_device_create_buffer_init(
-    game.device,
-    &(const frmwrk_buffer_init_descriptor){
-      .label = "index_buffer",
-      .content = (void *)indices,
-      .content_size = sizeof(indices),
-      .usage = WGPUBufferUsage_Index,
-    }
-  );
-
-  WGPUPipelineLayout pipeline_layout = wgpuDeviceCreatePipelineLayout(
-    game.device,
-    &(const WGPUPipelineLayoutDescriptor){
-      .label = "pipeline_layout",
-      .bindGroupLayoutCount = 1,
-      .bindGroupLayouts = (const WGPUBindGroupLayout[]){
-        bgl,
-      },
-    }
-  );
-  assert(pipeline_layout);
-
-  WGPUSurfaceCapabilities surface_capabilities = {0};
-  wgpuSurfaceGetCapabilities(game.surface, game.adapter, &surface_capabilities);
-
-  WGPUTextureFormat surface_format = surface_capabilities.formats[0];
-
-  WGPURenderPipeline render_pipeline = wgpuDeviceCreateRenderPipeline(
-    game.device,
-    &(const WGPURenderPipelineDescriptor){
-      .label = "render_pipeline",
-      .layout = pipeline_layout,
-      .vertex = (const WGPUVertexState){
-        .module = shader_module,
-        .entryPoint = "vs_main",
-        .bufferCount = 1,
-        .buffers = (const WGPUVertexBufferLayout[]){
-          (const WGPUVertexBufferLayout){
-            .arrayStride = FLOATS_PER_VERTEX * sizeof(float),
-            .stepMode = WGPUVertexStepMode_Vertex,
-            .attributeCount = sizeof(vertex_attributes) /
-                              sizeof(vertex_attributes[0]),
-            .attributes = vertex_attributes,
-          },
-        },
-      },
-      .fragment = &(const WGPUFragmentState){
-        .module = shader_module,
-        .entryPoint = "fs_main",
-        .targetCount = 1,
-        .targets = (const WGPUColorTargetState[]){
-          (const WGPUColorTargetState){
-            .format = surface_format,
-            .writeMask = WGPUColorWriteMask_All,
-          },
-        },
-      },
-      .primitive = (const WGPUPrimitiveState){
-        .topology = WGPUPrimitiveTopology_TriangleList,
-      },
-      .multisample = (const WGPUMultisampleState){
-        .count = 1,
-        .mask = 0xFFFFFFFF,
-      },
-      .depthStencil = &(WGPUDepthStencilState){
-        .depthWriteEnabled = true,
-        .depthCompare = WGPUCompareFunction_Less,
-        .format = WGPUTextureFormat_Depth24Plus,
-        .stencilBack = (WGPUStencilFaceState){
-          .compare = WGPUCompareFunction_Always,
-          .failOp = WGPUStencilOperation_Replace,
-          .depthFailOp = WGPUStencilOperation_Replace,
-          .passOp = WGPUStencilOperation_Replace,
-        },
-        .stencilFront = (WGPUStencilFaceState){
-          .compare = WGPUCompareFunction_Always,
-          .failOp = WGPUStencilOperation_Replace,
-          .depthFailOp = WGPUStencilOperation_Replace,
-          .passOp = WGPUStencilOperation_Replace,
-        },
-      },
-    }
-  );
-  assert(render_pipeline);
-
-  game.config = (const WGPUSurfaceConfiguration){
-    .device = game.device,
-    .usage = WGPUTextureUsage_RenderAttachment,
-    .format = surface_format,
-    .presentMode = WGPUPresentMode_Fifo,
-    .alphaMode = surface_capabilities.alphaModes[0],
-  };
-
-  game.depth_texture_descriptor = (WGPUTextureDescriptor){
-    .usage = WGPUTextureUsage_RenderAttachment,
-    .dimension = WGPUTextureDimension_2D,
-    .size = {
-      .depthOrArrayLayers = 1,
-    },
-    .format = WGPUTextureFormat_Depth24Plus,
-    .mipLevelCount = 1,
-    .sampleCount = 1,
-  };
+  init_chunk_renderer();
 
   int width, height;
   glfwGetWindowSize(window, &width, &height);
@@ -1338,13 +1348,13 @@ int main(int argc, char *argv[]) {
 
     mat4 view;
     glm_lookat(eye, center, game.up, view);
-    memcpy(&uniforms.view, view, sizeof(view));
+    memcpy(&game.uniforms.view, view, sizeof(view));
 
     mat4 projection;
     glm_perspective(
       GLM_PI_2, (float)game.config.width / (float)game.config.height, 0.01f, 100.0f, projection
     );
-    memcpy(&uniforms.projection, projection, sizeof(projection));
+    memcpy(&game.uniforms.projection, projection, sizeof(projection));
 
     // Day: 23,961 - 23,999, 0 - 12,039 is at 15
     // Dusk: 12,040 - 13,670 goes from light 15 to 4
@@ -1360,11 +1370,11 @@ int main(int argc, char *argv[]) {
       sky_max = 4.0f + (15.0f - 4.0f) * (time - 22330.0f) / (23960.0f - 22330.0f);
     }
 
-    uniforms.internal_sky_max = sky_max / 15.0f;
+    game.uniforms.internal_sky_max = sky_max / 15.0f;
     float sky_color_scale = pow(glm_clamp((sky_max - 4.0) / 11.0, 0.0, 1.0), 3.0);
 
     // Send uniforms to GPU
-    wgpuQueueWriteBuffer(queue, uniform_buffer, 0, &uniforms, sizeof(uniforms));
+    wgpuQueueWriteBuffer(game.queue, game.uniform_buffer, 0, &game.uniforms, sizeof(game.uniforms));
 
     WGPUSurfaceTexture surface_texture;
     wgpuSurfaceGetCurrentTexture(game.surface, &surface_texture);
@@ -1445,9 +1455,9 @@ int main(int argc, char *argv[]) {
       );
     assert(render_pass_encoder);
 
-    wgpuRenderPassEncoderSetIndexBuffer(render_pass_encoder, index_buffer, WGPUIndexFormat_Uint32, 0, WGPU_WHOLE_SIZE);
-    wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, bg, 0, NULL);
-    wgpuRenderPassEncoderSetPipeline(render_pass_encoder, render_pipeline);
+    wgpuRenderPassEncoderSetIndexBuffer(render_pass_encoder, game.index_buffer, WGPUIndexFormat_Uint32, 0, WGPU_WHOLE_SIZE);
+    wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, game.bind_group, 0, NULL);
+    wgpuRenderPassEncoderSetPipeline(render_pass_encoder, game.render_pipeline);
 
     for (int ci = 0; ci < MAX_CHUNKS; ci += 1) {
       Chunk *chunk = game.world.chunks[ci];
@@ -1473,7 +1483,7 @@ int main(int argc, char *argv[]) {
     );
     assert(command_buffer);
 
-    wgpuQueueSubmit(queue, 1, (const WGPUCommandBuffer[]){command_buffer});
+    wgpuQueueSubmit(game.queue, 1, (const WGPUCommandBuffer[]){command_buffer});
     wgpuSurfacePresent(game.surface);
 
     wgpuCommandBufferRelease(command_buffer);
@@ -1491,16 +1501,16 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  wgpuRenderPipelineRelease(render_pipeline);
-  wgpuPipelineLayoutRelease(pipeline_layout);
-  wgpuShaderModuleRelease(shader_module);
-  wgpuSurfaceCapabilitiesFreeMembers(surface_capabilities);
-  wgpuQueueRelease(queue);
+  wgpuRenderPipelineRelease(game.render_pipeline);
+  wgpuPipelineLayoutRelease(game.pipeline_layout);
+  wgpuShaderModuleRelease(game.shader_module);
+  wgpuSurfaceCapabilitiesFreeMembers(game.surface_capabilities);
+  wgpuQueueRelease(game.queue);
   wgpuDeviceRelease(game.device);
   wgpuAdapterRelease(game.adapter);
   wgpuSurfaceRelease(game.surface);
   // chunk_release(chunk);
-  wgpuBufferRelease(uniform_buffer);
+  wgpuBufferRelease(game.uniform_buffer);
   glfwDestroyWindow(window);
   wgpuInstanceRelease(game.instance);
   glfwTerminate();
