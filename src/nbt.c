@@ -1,6 +1,6 @@
 #include "nbt.h"
 
-#include <inttypes.h>
+#include <string.h>
 
 #include "datatypes.h"
 #include "protocol.h"
