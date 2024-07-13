@@ -58,6 +58,7 @@ typedef struct Game {
   Uniforms uniforms;
   WGPUPipelineLayout pipeline_layout;
   WGPUShaderModule shader_module;
+  GLFWwindow *window;
   float eye_height;
   vec3 size;
   bool keys[GLFW_KEY_LAST + 1];
@@ -657,6 +658,42 @@ int add_texture(cJSON *textures, const char *name, unsigned char *texture_sheet,
   return texture_id;
 }
 
+void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char *username) {
+  mcapiConnection *conn = mcapi_create_connection(server_ip, port, uuid, access_token);
+  game.conn = conn;
+
+  mcapi_send_handshake(
+    conn,
+    (mcapiHandshakePacket){
+      .protocol_version = 767,
+      .server_addr = server_ip,
+      .server_port = port,
+      .next_state = 2,
+    }
+  );
+
+  mcapi_send_login_start(
+    conn,
+    (mcapiLoginStartPacket){
+      .username = mcapi_to_string(username),
+      .uuid = (mcapiUUID){
+        .upper = 0,
+        .lower = 0,
+      },
+    }
+  );
+
+  mcapi_set_state(conn, MCAPI_STATE_LOGIN);
+
+  mcapi_set_login_success_cb(conn, on_login_success);
+  mcapi_set_clientbound_known_packs_cb(conn, on_known_packs);
+  mcapi_set_finish_config_cb(conn, on_finish_config);
+  mcapi_set_chunk_and_light_data_cb(conn, on_chunk);
+  mcapi_set_synchronize_player_position_cb(conn, on_position);
+  mcapi_set_registry_data_cb(conn, on_registry);
+  mcapi_set_update_time_cb(conn, on_update_time);
+}
+
 void init_chunk_renderer() {
   game.shader_module =
     frmwrk_load_shader_module(game.device, "shader.wgsl");
@@ -1104,84 +1141,29 @@ void load_block_models() {
   // save_image("texture_sheet.png", texture_sheet, TEXTURE_SIZE * TEXTURE_TILES, TEXTURE_SIZE * TEXTURE_TILES);
 }
 
-int main(int argc, char *argv[]) {
-  if (argc < 6) {
-    perror("Usage: cmc [username] [server ip] [port] [uuid] [access_token]\n");
-    exit(1);
-  }
-
-  char *username = argv[1];
-  char *server_ip = argv[2];
-  long long _port = strtol(argv[3], NULL, 10);
-  char *uuid = argv[4];
-  char *access_token = argv[5];
-
-  if (_port < 1 || _port > 65535) {
-    perror("Invalid port. Must be between 1 and 65535\n");
-    exit(1);
-  }
-
-  unsigned short port = _port;
-
-  frmwrk_setup_logging(WGPULogLevel_Warn);
-
-  mcapiConnection *conn = mcapi_create_connection(server_ip, port, uuid, access_token);
-  game.conn = conn;
-
-  mcapi_send_handshake(
-    conn,
-    (mcapiHandshakePacket){
-      .protocol_version = 767,
-      .server_addr = server_ip,
-      .server_port = port,
-      .next_state = 2,
-    }
-  );
-
-  mcapi_send_login_start(
-    conn,
-    (mcapiLoginStartPacket){
-      .username = mcapi_to_string(username),
-      .uuid = (mcapiUUID){
-        .upper = 0,
-        .lower = 0,
-      },
-    }
-  );
-
-  mcapi_set_state(conn, MCAPI_STATE_LOGIN);
-
-  mcapi_set_login_success_cb(conn, on_login_success);
-  mcapi_set_clientbound_known_packs_cb(conn, on_known_packs);
-  mcapi_set_finish_config_cb(conn, on_finish_config);
-  mcapi_set_chunk_and_light_data_cb(conn, on_chunk);
-  mcapi_set_synchronize_player_position_cb(conn, on_position);
-  mcapi_set_registry_data_cb(conn, on_registry);
-  mcapi_set_update_time_cb(conn, on_update_time);
-
-  load_block_models();
-
-  game.instance = wgpuCreateInstance(NULL);
-  assert(game.instance);
-
+void init_glfw() {
   if (!glfwInit()) exit(EXIT_FAILURE);
 
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-  GLFWwindow *window =
-    glfwCreateWindow(640, 480, "cmc", NULL, NULL);
-  assert(window);
+  game.window = glfwCreateWindow(640, 480, "cmc", NULL, NULL);
+  assert(game.window);
 
-  glfwSetWindowUserPointer(window, (void *)&game);
-  glfwSetKeyCallback(window, handle_glfw_key);
-  glfwSetFramebufferSizeCallback(window, handle_glfw_framebuffer_size);
-  glfwSetCursorPosCallback(window, handle_glfw_cursor_pos);
-  glfwSetMouseButtonCallback(window, handle_glfw_set_mouse_button);
-  glfwSetScrollCallback(window, handle_glfw_set_scroll);
+  glfwSetWindowUserPointer(game.window, (void *)&game);
+  glfwSetKeyCallback(game.window, handle_glfw_key);
+  glfwSetFramebufferSizeCallback(game.window, handle_glfw_framebuffer_size);
+  glfwSetCursorPosCallback(game.window, handle_glfw_cursor_pos);
+  glfwSetMouseButtonCallback(game.window, handle_glfw_set_mouse_button);
+  glfwSetScrollCallback(game.window, handle_glfw_set_scroll);
+}
+
+void init_surface() {
+  game.instance = wgpuCreateInstance(NULL);
+  assert(game.instance);
 
 #if defined(GLFW_EXPOSE_NATIVE_COCOA)
   {
     id metal_layer = NULL;
-    NSWindow *ns_window = glfwGetCocoaWindow(window);
+    NSWindow *ns_window = glfwGetCocoaWindow(game.window);
     [ns_window.contentView setWantsLayer:YES];
     metal_layer = [CAMetalLayer layer];
     [ns_window.contentView setLayer:metal_layer];
@@ -1204,7 +1186,7 @@ int main(int argc, char *argv[]) {
 #elif defined(GLFW_EXPOSE_NATIVE_WAYLAND) && defined(GLFW_EXPOSE_NATIVE_X11)
   if (glfwGetPlatform() == GLFW_PLATFORM_X11) {
     Display *x11_display = glfwGetX11Display();
-    Window x11_window = glfwGetX11Window(window);
+    Window x11_window = glfwGetX11Window(game.window);
     game.surface = wgpuInstanceCreateSurface(
       game.instance,
       &(const WGPUSurfaceDescriptor){
@@ -1224,7 +1206,7 @@ int main(int argc, char *argv[]) {
   }
   if (glfwGetPlatform() == GLFW_PLATFORM_WAYLAND) {
     struct wl_display *wayland_display = glfwGetWaylandDisplay();
-    struct wl_surface *wayland_surface = glfwGetWaylandWindow(window);
+    struct wl_surface *wayland_surface = glfwGetWaylandWindow(game.window);
     game.surface = wgpuInstanceCreateSurface(
       game.instance,
       &(const WGPUSurfaceDescriptor){
@@ -1245,7 +1227,7 @@ int main(int argc, char *argv[]) {
   }
 #elif defined(GLFW_EXPOSE_NATIVE_WIN32)
   {
-    HWND hwnd = glfwGetWin32Window(window);
+    HWND hwnd = glfwGetWin32Window(game.window);
     HINSTANCE hinstance = GetModuleHandle(NULL);
     game.surface = wgpuInstanceCreateSurface(
       game.instance,
@@ -1283,11 +1265,41 @@ int main(int argc, char *argv[]) {
 
   game.queue = wgpuDeviceGetQueue(game.device);
   assert(game.queue);
+}
+
+int main(int argc, char *argv[]) {
+  if (argc < 6) {
+    perror("Usage: cmc [username] [server ip] [port] [uuid] [access_token]\n");
+    exit(1);
+  }
+
+  char *username = argv[1];
+  char *server_ip = argv[2];
+  long long _port = strtol(argv[3], NULL, 10);
+  char *uuid = argv[4];
+  char *access_token = argv[5];
+
+  if (_port < 1 || _port > 65535) {
+    perror("Invalid port. Must be between 1 and 65535\n");
+    exit(1);
+  }
+
+  unsigned short port = _port;
+
+  init_mcapi(server_ip, port, uuid, access_token, username);
+
+  frmwrk_setup_logging(WGPULogLevel_Warn);
+
+  load_block_models();
+
+  init_glfw();
+
+  init_surface();
 
   init_chunk_renderer();
 
   int width, height;
-  glfwGetWindowSize(window, &width, &height);
+  glfwGetWindowSize(game.window, &width, &height);
   update_window_size(&game, width, height);
 
   double lastRenderTime = glfwGetTime();
@@ -1296,8 +1308,8 @@ int main(int argc, char *argv[]) {
   double lastTickTime = glfwGetTime();
   double targetTickTime = 1.0 / TICKS_PER_SECOND;
 
-  while (!glfwWindowShouldClose(window)) {
-    mcapi_poll(conn);
+  while (!glfwWindowShouldClose(game.window)) {
+    mcapi_poll(game.conn);
     glfwPollEvents();
 
     double currentTime = glfwGetTime();
@@ -1308,14 +1320,14 @@ int main(int argc, char *argv[]) {
       // Force the update to be one tick
       update_player_position(&game, (float)(1.0 / TICKS_PER_SECOND));
       lastTickTime = currentTime;
-      if (mcapi_get_state(conn) == MCAPI_STATE_PLAY) {
+      if (mcapi_get_state(game.conn) == MCAPI_STATE_PLAY) {
         float yaw = -atan2(game.look[0], game.look[2]) / GLM_PIf * 180.0f;
         if (yaw < 0.0f) {
           yaw += 360.0f;
         }
         float pitch = -game.elevation * 180.0f / GLM_PIf;
         mcapi_send_set_player_position_and_rotation(
-          conn,
+          game.conn,
           (mcapiSetPlayerPositionAndRotationPacket){
             .x = game.position[0],
             .y = game.position[1],
@@ -1334,19 +1346,10 @@ int main(int argc, char *argv[]) {
     }
     lastRenderTime = currentTime;
 
-    // vec3 movement;
-    // glm_vec3_scale(game.last_movement, deltaTickTime * TICKS_PER_SECOND, movement);
-    // vec3 position;
-    // glm_vec3_add(game.position, movement, position);
-    // vec3 eye = {position[0], position[1] + game.eye_height, position[2]};
-
     // Interpolate between last and current position for smooth movement
     vec3 position;
     glm_vec3_lerp(game.last_position, game.position, (currentTime - lastTickTime) * TICKS_PER_SECOND, position);
     vec3 eye = {position[0], position[1] + game.eye_height, position[2]};
-
-    // No interpolation
-    // vec3 eye = {game.position[0], game.position[1] + game.eye_height, game.position[2]};
 
     vec3 center;
     glm_vec3_add(eye, game.look, center);
@@ -1395,7 +1398,7 @@ int main(int argc, char *argv[]) {
           wgpuTextureRelease(surface_texture.texture);
         }
         int width, height;
-        glfwGetWindowSize(window, &width, &height);
+        glfwGetWindowSize(game.window, &width, &height);
         if (width != 0 && height != 0) {
           update_window_size(&game, width, height);
         }
@@ -1515,10 +1518,10 @@ int main(int argc, char *argv[]) {
   wgpuAdapterRelease(game.adapter);
   wgpuSurfaceRelease(game.surface);
   wgpuBufferRelease(game.uniform_buffer);
-  glfwDestroyWindow(window);
+  glfwDestroyWindow(game.window);
   wgpuInstanceRelease(game.instance);
   glfwTerminate();
-  mcapi_destroy_connection(conn);
+  mcapi_destroy_connection(game.conn);
   cJSON_Delete(game.blocks);
   return 0;
 }
