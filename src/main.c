@@ -82,6 +82,11 @@ typedef struct Game {
   mcapiConnection *conn;
   unsigned char texture_sheet[TEXTURE_SIZE * TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_TILES * 4];
   cJSON *blocks;
+  double target_render_time;
+  double last_render_time;
+  double target_tick_time;
+  double last_tick_time;
+  double current_time;
 } Game;
 
 Game game = {
@@ -155,8 +160,7 @@ static void handle_request_adapter(
   void *userdata
 ) {
   if (status == WGPURequestAdapterStatus_Success) {
-    Game *game = userdata;
-    game->adapter = adapter;
+    game.adapter = adapter;
   } else {
     printf(LOG_PREFIX " request_adapter status=%#.8x message=%s\n", status, message);
   }
@@ -167,8 +171,7 @@ static void handle_request_device(
   void *userdata
 ) {
   if (status == WGPURequestDeviceStatus_Success) {
-    Game *game = userdata;
-    game->device = device;
+    game.device = device;
   } else {
     printf(LOG_PREFIX " request_device status=%#.8x message=%s\n", status, message);
   }
@@ -179,40 +182,39 @@ static void handle_glfw_key(
 ) {
   UNUSED(scancode)
   UNUSED(mods)
-  Game *game = glfwGetWindowUserPointer(window);
-  if (!game || !game->instance) return;
+  if (!game.instance) return;
 
   switch (action) {
     case GLFW_PRESS:
-      game->keys[key] = true;
+      game.keys[key] = true;
       switch (key) {
         case GLFW_KEY_ESCAPE:
           glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-          game->mouse_captured = false;
+          game.mouse_captured = false;
           break;
         case GLFW_KEY_R:
           WGPUGlobalReport report;
-          wgpuGenerateReport(game->instance, &report);
+          wgpuGenerateReport(game.instance, &report);
           frmwrk_print_global_report(report);
           break;
       }
       break;
     case GLFW_RELEASE:
-      game->keys[key] = false;
+      game.keys[key] = false;
       break;
   }
 }
 
-void update_window_size(Game *game, int width, int height) {
-  if (game->depth_texture != NULL) {
-    wgpuTextureRelease(game->depth_texture);
+void update_window_size(int width, int height) {
+  if (game.depth_texture != NULL) {
+    wgpuTextureRelease(game.depth_texture);
   }
-  game->config.width = width;
-  game->config.height = height;
-  wgpuSurfaceConfigure(game->surface, &game->config);
-  game->depth_texture_descriptor.size.width = game->config.width;
-  game->depth_texture_descriptor.size.height = game->config.height;
-  game->depth_texture = wgpuDeviceCreateTexture(game->device, &game->depth_texture_descriptor);
+  game.config.width = width;
+  game.config.height = height;
+  wgpuSurfaceConfigure(game.surface, &game.config);
+  game.depth_texture_descriptor.size.width = game.config.width;
+  game.depth_texture_descriptor.size.height = game.config.height;
+  game.depth_texture = wgpuDeviceCreateTexture(game.device, &game.depth_texture_descriptor);
 }
 
 static void handle_glfw_framebuffer_size(GLFWwindow *window, int width, int height) {
@@ -223,59 +225,54 @@ static void handle_glfw_framebuffer_size(GLFWwindow *window, int width, int heig
   Game *game = glfwGetWindowUserPointer(window);
   if (!game) return;
 
-  update_window_size(game, width, height);
+  update_window_size(width, height);
 }
 
 static void handle_glfw_cursor_pos(GLFWwindow *window, double xpos, double ypos) {
-  Game *game = glfwGetWindowUserPointer(window);
-  if (!game) return;
-
   vec2 current = {xpos, ypos};
-  if (!game->mouse_captured) {
-    glm_vec2_copy(current, game->last_mouse);
+  if (!game.mouse_captured) {
+    glm_vec2_copy(current, game.last_mouse);
     return;
   };
 
   vec2 delta;
-  glm_vec2_sub(current, game->last_mouse, delta);
-  glm_vec2_copy(current, game->last_mouse);
-  game->elevation -= delta[1] * TURN_SPEED;
-  game->elevation = glm_clamp(game->elevation, -GLM_PI_2 + 0.1f, GLM_PI_2 - 0.1f);
+  glm_vec2_sub(current, game.last_mouse, delta);
+  glm_vec2_copy(current, game.last_mouse);
+  game.elevation -= delta[1] * TURN_SPEED;
+  game.elevation = glm_clamp(game.elevation, -GLM_PI_2 + 0.1f, GLM_PI_2 - 0.1f);
 
   float delta_azimuth = -delta[0] * TURN_SPEED;
-  glm_vec3_rotate(game->forward, delta_azimuth, game->up);
-  glm_vec3_normalize(game->forward);
-  glm_vec3_cross(game->forward, game->up, game->right);
-  glm_vec3_normalize(game->right);
-  glm_vec3_copy(game->forward, game->look);
-  glm_vec3_rotate(game->look, game->elevation, game->right);
-  glm_vec3_normalize(game->look);
+  glm_vec3_rotate(game.forward, delta_azimuth, game.up);
+  glm_vec3_normalize(game.forward);
+  glm_vec3_cross(game.forward, game.up, game.right);
+  glm_vec3_normalize(game.right);
+  glm_vec3_copy(game.forward, game.look);
+  glm_vec3_rotate(game.look, game.elevation, game.right);
+  glm_vec3_normalize(game.look);
 }
 
 static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int action, int mods) {
   static int seq_num = 12;
   UNUSED(mods)
-  Game *game = glfwGetWindowUserPointer(window);
-  if (!game) return;
 
   switch (action) {
     case GLFW_PRESS:
-      if (!game->mouse_captured) {
+      if (!game.mouse_captured) {
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        game->mouse_captured = true;
+        game.mouse_captured = true;
         break;
       }
       float reach = 5.0f;
       vec3 target;
       vec3 normal;
       int material;
-      vec3 eye = {game->position[0], game->position[1] + game->eye_height, game->position[2]};
-      world_target_block(&game->world, eye, game->look, reach, target, normal, &material);
+      vec3 eye = {game.position[0], game.position[1] + game.eye_height, game.position[2]};
+      world_target_block(&game.world, eye, game.look, reach, target, normal, &material);
       if (material != 0) {
         switch (button) {
           case GLFW_MOUSE_BUTTON_LEFT:
-            world_set_block(&game->world, target, 0, game->block_info, game->biome_info, game->device);
-            mcapi_send_player_action(game->conn, (mcapiPlayerActionPacket){
+            world_set_block(&game.world, target, 0, game.block_info, game.biome_info, game.device);
+            mcapi_send_player_action(game.conn, (mcapiPlayerActionPacket){
                                                    .face = MCAPI_FACE_EAST,
                                                    .position = {target[0], target[1], target[2]},
                                                    .status = MCAPI_ACTION_DIG_START,
@@ -286,7 +283,7 @@ static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int act
           case GLFW_MOUSE_BUTTON_RIGHT:
             vec3 air_position;
             glm_vec3_add(target, normal, air_position);
-            world_set_block(&game->world, air_position, 1, game->block_info, game->biome_info, game->device);
+            world_set_block(&game.world, air_position, 1, game.block_info, game.biome_info, game.device);
             break;
         }
       }
@@ -300,22 +297,22 @@ static void handle_glfw_set_scroll(GLFWwindow *window, double xoffset, double yo
   UNUSED(yoffset)
 }
 
-void game_update_player_y(Game *game, float delta) {
+void game_update_player_y(float delta) {
   vec3 p;
-  glm_vec3_copy(game->position, p);
+  glm_vec3_copy(game.position, p);
   float new_y = p[1] + delta;
-  vec3 sz = {game->size[0] / 2, game->size[1], game->size[2] / 2};
-  World *w = &game->world;
+  vec3 sz = {game.size[0] / 2, game.size[1], game.size[2] / 2};
+  World *w = &game.world;
 
   // Move +y
   if (delta > 0 && floor(new_y + sz[1]) > floor(p[1] + sz[1])) {
     for (int dx = -1; dx <= 1; dx += 2) {
       for (int dz = -1; dz <= 1; dz += 2) {
         int m = world_get_material(w, (vec3){p[0] + dx * sz[0], new_y + sz[1], p[2] + dz * sz[2]});
-        if (!game->block_info[m].passable) {
-          game->position[1] = floor(new_y + sz[1]) - sz[1] - COLLISION_EPSILON;
-          game->velocity[1] = 0;
-          game->fall_speed = 0;
+        if (!game.block_info[m].passable) {
+          game.position[1] = floor(new_y + sz[1]) - sz[1] - COLLISION_EPSILON;
+          game.velocity[1] = 0;
+          game.fall_speed = 0;
           return;
         }
       }
@@ -326,37 +323,37 @@ void game_update_player_y(Game *game, float delta) {
     for (int dx = -1; dx <= 1; dx += 2) {
       for (int dz = -1; dz <= 1; dz += 2) {
         int m = world_get_material(w, (vec3){p[0] + dx * sz[0], new_y, p[2] + dz * sz[2]});
-        if (!game->block_info[m].passable) {
-          game->position[1] = ceil(new_y) + COLLISION_EPSILON;
-          game->velocity[1] = 0;
-          game->on_ground = true;
-          game->fall_speed = 0;
+        if (!game.block_info[m].passable) {
+          game.position[1] = ceil(new_y) + COLLISION_EPSILON;
+          game.velocity[1] = 0;
+          game.on_ground = true;
+          game.fall_speed = 0;
           return;
         }
       }
     }
   }
-  if (new_y > game->position[1] && game->on_ground) {
-    game->on_ground = false;
+  if (new_y > game.position[1] && game.on_ground) {
+    game.on_ground = false;
   }
-  game->position[1] = new_y;
+  game.position[1] = new_y;
 }
 
-void game_update_player_x(Game *game, float delta) {
+void game_update_player_x(float delta) {
   vec3 p;
-  glm_vec3_copy(game->position, p);
+  glm_vec3_copy(game.position, p);
   float new_x = p[0] + delta;
-  vec3 sz = {game->size[0] / 2, game->size[1], game->size[2] / 2};
-  World *w = &game->world;
+  vec3 sz = {game.size[0] / 2, game.size[1], game.size[2] / 2};
+  World *w = &game.world;
 
   // Move +x
   if (delta > 0 && floor(new_x + sz[0]) > floor(p[0] + sz[0])) {
     for (int dz = -1; dz <= 1; dz += 2) {
       for (int dy = 0; dy <= 2; dy += 1) {
         int m = world_get_material(w, (vec3){new_x + sz[0], p[1] + 0.5f * dy * sz[1], p[2] + dz * sz[2]});
-        if (!game->block_info[m].passable) {
-          game->position[0] = floor(new_x + sz[0]) - sz[0] - COLLISION_EPSILON;
-          game->velocity[0] = 0;
+        if (!game.block_info[m].passable) {
+          game.position[0] = floor(new_x + sz[0]) - sz[0] - COLLISION_EPSILON;
+          game.velocity[0] = 0;
           return;
         }
       }
@@ -367,32 +364,32 @@ void game_update_player_x(Game *game, float delta) {
     for (int dz = -1; dz <= 1; dz += 2) {
       for (int dy = 0; dy <= 2; dy += 1) {
         int m = world_get_material(w, (vec3){new_x - sz[0], p[1] + 0.5f * dy * sz[1], p[2] + dz * sz[2]});
-        if (!game->block_info[m].passable) {
-          game->position[0] = ceil(new_x - sz[0]) + sz[0] + COLLISION_EPSILON;
-          game->velocity[0] = 0;
+        if (!game.block_info[m].passable) {
+          game.position[0] = ceil(new_x - sz[0]) + sz[0] + COLLISION_EPSILON;
+          game.velocity[0] = 0;
           return;
         }
       }
     }
   }
-  game->position[0] = new_x;
+  game.position[0] = new_x;
 }
 
-void game_update_player_z(Game *game, float delta) {
+void game_update_player_z(float delta) {
   vec3 p;
-  glm_vec3_copy(game->position, p);
+  glm_vec3_copy(game.position, p);
   float new_z = p[2] + delta;
-  vec3 sz = {game->size[0] / 2, game->size[1], game->size[2] / 2};
-  World *w = &game->world;
+  vec3 sz = {game.size[0] / 2, game.size[1], game.size[2] / 2};
+  World *w = &game.world;
 
   // Move +z
   if (delta > 0 && floor(new_z + sz[2]) > floor(p[2] + sz[2])) {
     for (int dx = -1; dx <= 1; dx += 2) {
       for (int dy = 0; dy <= 2; dy += 1) {
         int m = world_get_material(w, (vec3){p[0] + dx * sz[0], p[1] + 0.5f * dy * sz[1], new_z + sz[2]});
-        if (!game->block_info[m].passable) {
-          game->position[2] = floor(new_z + sz[2]) - sz[2] - COLLISION_EPSILON;
-          game->velocity[2] = 0;
+        if (!game.block_info[m].passable) {
+          game.position[2] = floor(new_z + sz[2]) - sz[2] - COLLISION_EPSILON;
+          game.velocity[2] = 0;
           return;
         }
       }
@@ -403,75 +400,94 @@ void game_update_player_z(Game *game, float delta) {
     for (int dx = -1; dx <= 1; dx += 2) {
       for (int dy = 0; dy <= 2; dy += 1) {
         int m = world_get_material(w, (vec3){p[0] + dx * sz[0], p[1] + 0.5f * dy * sz[1], new_z - sz[2]});
-        if (!game->block_info[m].passable) {
-          game->position[2] = ceil(new_z - sz[2]) + sz[2] + COLLISION_EPSILON;
-          game->velocity[2] = 0;
+        if (!game.block_info[m].passable) {
+          game.position[2] = ceil(new_z - sz[2]) + sz[2] + COLLISION_EPSILON;
+          game.velocity[2] = 0;
           return;
         }
       }
     }
   }
-  game->position[2] = new_z;
+  game.position[2] = new_z;
 }
 
-void update_player_position(Game *game, float dt) {
+void update_player_position(float dt) {
   vec3 desired_velocity = {0};
-  float speed = game->walking_speed;
-  if (game->keys[GLFW_KEY_D]) {
+  float speed = game.walking_speed;
+  if (game.keys[GLFW_KEY_D]) {
     vec3 delta;
-    glm_vec3_scale(game->right, speed, delta);
+    glm_vec3_scale(game.right, speed, delta);
     glm_vec3_add(desired_velocity, delta, desired_velocity);
   }
-  if (game->keys[GLFW_KEY_A]) {
+  if (game.keys[GLFW_KEY_A]) {
     vec3 delta;
-    glm_vec3_scale(game->right, speed, delta);
+    glm_vec3_scale(game.right, speed, delta);
     glm_vec3_sub(desired_velocity, delta, desired_velocity);
   }
-  if (game->keys[GLFW_KEY_W]) {
+  if (game.keys[GLFW_KEY_W]) {
     vec3 delta;
-    glm_vec3_scale(game->forward, speed, delta);
+    glm_vec3_scale(game.forward, speed, delta);
     glm_vec3_add(desired_velocity, delta, desired_velocity);
   }
-  if (game->keys[GLFW_KEY_S]) {
+  if (game.keys[GLFW_KEY_S]) {
     vec3 delta;
-    glm_vec3_scale(game->forward, speed, delta);
+    glm_vec3_scale(game.forward, speed, delta);
     glm_vec3_sub(desired_velocity, delta, desired_velocity);
   }
-  if (game->keys[GLFW_KEY_SPACE]) {
+  if (game.keys[GLFW_KEY_SPACE]) {
     // vec3 delta;
-    // glm_vec3_scale(game->up, speed, delta);
+    // glm_vec3_scale(game.up, speed, delta);
     // glm_vec3_add(desired_velocity, delta, desired_velocity);
-    if (game->on_ground) {
-      game->fall_speed = 0.42f * TICKS_PER_SECOND;
-      game->on_ground = false;
+    if (game.on_ground) {
+      game.fall_speed = 0.42f * TICKS_PER_SECOND;
+      game.on_ground = false;
     }
   }
-  // if (game->keys[GLFW_KEY_LEFT_SHIFT]) {
+  // if (game.keys[GLFW_KEY_LEFT_SHIFT]) {
   //   vec3 delta;
-  //   glm_vec3_scale(game->up, speed, delta);
+  //   glm_vec3_scale(game.up, speed, delta);
   //   glm_vec3_sub(desired_velocity, delta, desired_velocity);
   // }
-  desired_velocity[1] += game->fall_speed;
-  glm_vec3_mix(game->velocity, desired_velocity, 0.8f, game->velocity);
+  desired_velocity[1] += game.fall_speed;
+  glm_vec3_mix(game.velocity, desired_velocity, 0.8f, game.velocity);
 
   // Update position
   vec3 delta;
-  glm_vec3_scale(game->velocity, dt, delta);
+  glm_vec3_scale(game.velocity, dt, delta);
 
-  glm_vec3_copy(game->position, game->last_position);
+  glm_vec3_copy(game.position, game.last_position);
 
-  game_update_player_y(game, delta[1]);
+  game_update_player_y(delta[1]);
   if (abs(delta[0]) > abs(delta[2])) {
-    game_update_player_x(game, delta[0]);
-    game_update_player_z(game, delta[2]);
+    game_update_player_x(delta[0]);
+    game_update_player_z(delta[2]);
   } else {
-    game_update_player_z(game, delta[2]);
-    game_update_player_x(game, delta[0]);
+    game_update_player_z(delta[2]);
+    game_update_player_x(delta[0]);
   }
 
-  game->fall_speed -= 0.08f * TICKS_PER_SECOND;
-  if (game->fall_speed < 0.0f) {
-    game->fall_speed *= 0.98f;
+  game.fall_speed -= 0.08f * TICKS_PER_SECOND;
+  if (game.fall_speed < 0.0f) {
+    game.fall_speed *= 0.98f;
+  }
+
+  if (mcapi_get_state(game.conn) == MCAPI_STATE_PLAY) {
+    float yaw = -atan2(game.look[0], game.look[2]) / GLM_PIf * 180.0f;
+    if (yaw < 0.0f) {
+      yaw += 360.0f;
+    }
+    float pitch = -game.elevation * 180.0f / GLM_PIf;
+    mcapi_send_set_player_position_and_rotation(
+      game.conn,
+      (mcapiSetPlayerPositionAndRotationPacket){
+        .x = game.position[0],
+        .y = game.position[1],
+        .z = game.position[2],
+        .yaw = yaw,
+        .pitch = pitch,
+        .on_ground = true,
+      }
+    );
   }
 }
 
@@ -694,7 +710,7 @@ void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char 
   mcapi_set_update_time_cb(conn, on_update_time);
 }
 
-void init_chunk_renderer() {
+void chunk_renderer_init() {
   game.shader_module =
     frmwrk_load_shader_module(game.device, "shader.wgsl");
   assert(game.shader_module);
@@ -1014,6 +1030,163 @@ void init_chunk_renderer() {
   };
 }
 
+void chunk_renderer_render() {
+  // Interpolate between last and current position for smooth movement
+  vec3 position;
+  glm_vec3_lerp(game.last_position, game.position, (game.current_time - game.last_tick_time) * TICKS_PER_SECOND, position);
+  vec3 eye = {position[0], position[1] + game.eye_height, position[2]};
+
+  vec3 center;
+  glm_vec3_add(eye, game.look, center);
+
+  mat4 view;
+  glm_lookat(eye, center, game.up, view);
+  memcpy(&game.uniforms.view, view, sizeof(view));
+
+  mat4 projection;
+  glm_perspective(
+    GLM_PI_2, (float)game.config.width / (float)game.config.height, 0.01f, 100.0f, projection
+  );
+  memcpy(&game.uniforms.projection, projection, sizeof(projection));
+
+  // Day: 23,961 - 23,999, 0 - 12,039 is at 15
+  // Dusk: 12,040 - 13,670 goes from light 15 to 4
+  // Night: 13,671 - 22,329 is at 4
+  // Dawn: 22,330 - 23,960 goes from light 4 to 15
+  float sky_max = 15.0f;
+  int time = game.time_of_day % 24000;
+  if (time > 12040 && time < 13670) {
+    sky_max = 4.0f + (15.0f - 4.0f) * (13670.0f - time) / (13670.0f - 12040.0f);
+  } else if (time > 13670 && time < 22330) {
+    sky_max = 4.0f;
+  } else if (time > 22330 && time < 23960) {
+    sky_max = 4.0f + (15.0f - 4.0f) * (time - 22330.0f) / (23960.0f - 22330.0f);
+  }
+
+  game.uniforms.internal_sky_max = sky_max / 15.0f;
+  float sky_color_scale = pow(glm_clamp((sky_max - 4.0) / 11.0, 0.0, 1.0), 3.0);
+
+  // Send uniforms to GPU
+  wgpuQueueWriteBuffer(game.queue, game.uniform_buffer, 0, &game.uniforms, sizeof(game.uniforms));
+
+  WGPUSurfaceTexture surface_texture;
+  wgpuSurfaceGetCurrentTexture(game.surface, &surface_texture);
+  switch (surface_texture.status) {
+    case WGPUSurfaceGetCurrentTextureStatus_Success:
+      // All good, could check for `surface_texture.suboptimal` here.
+      break;
+    case WGPUSurfaceGetCurrentTextureStatus_Timeout:
+    case WGPUSurfaceGetCurrentTextureStatus_Outdated:
+    case WGPUSurfaceGetCurrentTextureStatus_Lost: {
+      // Skip this frame, and re-configure surface.
+      if (surface_texture.texture != NULL) {
+        wgpuTextureRelease(surface_texture.texture);
+      }
+      int width, height;
+      glfwGetWindowSize(game.window, &width, &height);
+      if (width != 0 && height != 0) {
+        update_window_size(width, height);
+      }
+      return;
+    }
+    case WGPUSurfaceGetCurrentTextureStatus_OutOfMemory:
+    case WGPUSurfaceGetCurrentTextureStatus_DeviceLost:
+    case WGPUSurfaceGetCurrentTextureStatus_Force32:
+      // Fatal error
+      printf(LOG_PREFIX " get_current_texture status=%#.8x\n", surface_texture.status);
+      abort();
+  }
+  assert(surface_texture.texture);
+
+  WGPUTextureView frame = wgpuTextureCreateView(surface_texture.texture, NULL);
+  assert(frame);
+
+  WGPUTextureView depth_frame = wgpuTextureCreateView(game.depth_texture, NULL);
+  assert(depth_frame);
+
+  WGPUCommandEncoder command_encoder = wgpuDeviceCreateCommandEncoder(
+    game.device,
+    &(const WGPUCommandEncoderDescriptor){
+      .label = "command_encoder",
+    }
+  );
+  assert(command_encoder);
+
+  vec3 sky_color;
+  world_get_sky_color(&game.world, game.position, game.biome_info, sky_color);
+
+  WGPURenderPassEncoder render_pass_encoder =
+    wgpuCommandEncoderBeginRenderPass(
+      command_encoder,
+      &(const WGPURenderPassDescriptor){
+        .label = "render_pass_encoder",
+        .colorAttachmentCount = 1,
+        .colorAttachments = (const WGPURenderPassColorAttachment[]){
+          (const WGPURenderPassColorAttachment){
+            .view = frame,
+            .loadOp = WGPULoadOp_Clear,
+            .storeOp = WGPUStoreOp_Store,
+            //  .depthSlice = WGPU_DEPTH_SLICE_UNDEFINED,
+            .clearValue = (const WGPUColor){
+              .r = pow(sky_color[0] * sky_color_scale, 2.2),
+              .g = pow(sky_color[1] * sky_color_scale, 2.2),
+              .b = pow(sky_color[2] * sky_color_scale, 2.2),
+              // .r = pow(0.431, 2.2),
+              // .g = pow(0.694, 2.2),
+              // .b = pow(1.000, 2.2),
+              .a = 1.0,
+            },
+          },
+        },
+        .depthStencilAttachment = &(WGPURenderPassDepthStencilAttachment){
+          .view = depth_frame,
+          .depthClearValue = 1.0f,
+          .depthLoadOp = WGPULoadOp_Clear,
+          .depthStoreOp = WGPUStoreOp_Store,
+        },
+      }
+    );
+  assert(render_pass_encoder);
+
+  wgpuRenderPassEncoderSetIndexBuffer(render_pass_encoder, game.index_buffer, WGPUIndexFormat_Uint32, 0, WGPU_WHOLE_SIZE);
+  wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, game.bind_group, 0, NULL);
+  wgpuRenderPassEncoderSetPipeline(render_pass_encoder, game.render_pipeline);
+
+  for (int ci = 0; ci < MAX_CHUNKS; ci += 1) {
+    Chunk *chunk = game.world.chunks[ci];
+    if (chunk == NULL) {
+      continue;
+    }
+    for (int s = 0; s < 24; s += 1) {
+      if (chunk->sections[s].num_quads == 0) {
+        continue;
+      }
+      wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, chunk->sections[s].vertex_buffer, 0, WGPU_WHOLE_SIZE);
+      wgpuRenderPassEncoderDrawIndexed(render_pass_encoder, chunk->sections[s].num_quads * 6, 1, 0, 0, 0);
+    }
+  }
+
+  wgpuRenderPassEncoderEnd(render_pass_encoder);
+
+  WGPUCommandBuffer command_buffer = wgpuCommandEncoderFinish(
+    command_encoder,
+    &(const WGPUCommandBufferDescriptor){
+      .label = "command_buffer",
+    }
+  );
+  assert(command_buffer);
+
+  wgpuQueueSubmit(game.queue, 1, (const WGPUCommandBuffer[]){command_buffer});
+  wgpuSurfacePresent(game.surface);
+
+  wgpuCommandBufferRelease(command_buffer);
+  wgpuRenderPassEncoderRelease(render_pass_encoder);
+  wgpuCommandEncoderRelease(command_encoder);
+  wgpuTextureViewRelease(frame);
+  wgpuTextureViewRelease(depth_frame);
+  wgpuTextureRelease(surface_texture.texture);
+}
+
 void load_block_models() {
   int num_id = 0;
   int max_id = -1;
@@ -1148,7 +1321,6 @@ void init_glfw() {
   game.window = glfwCreateWindow(640, 480, "cmc", NULL, NULL);
   assert(game.window);
 
-  glfwSetWindowUserPointer(game.window, (void *)&game);
   glfwSetKeyCallback(game.window, handle_glfw_key);
   glfwSetFramebufferSizeCallback(game.window, handle_glfw_framebuffer_size);
   glfwSetCursorPosCallback(game.window, handle_glfw_cursor_pos);
@@ -1296,210 +1468,39 @@ int main(int argc, char *argv[]) {
 
   init_surface();
 
-  init_chunk_renderer();
+  chunk_renderer_init();
 
   int width, height;
   glfwGetWindowSize(game.window, &width, &height);
-  update_window_size(&game, width, height);
+  update_window_size(width, height);
 
-  double lastRenderTime = glfwGetTime();
-  double targetRenderTime = 1.0 / 60.0;
+  game.last_render_time = glfwGetTime();
+  game.target_render_time = 1.0 / 60.0;
 
-  double lastTickTime = glfwGetTime();
-  double targetTickTime = 1.0 / TICKS_PER_SECOND;
+  game.last_tick_time = glfwGetTime();
+  game.target_tick_time = 1.0 / TICKS_PER_SECOND;
 
   while (!glfwWindowShouldClose(game.window)) {
     mcapi_poll(game.conn);
     glfwPollEvents();
 
-    double currentTime = glfwGetTime();
+    game.current_time = glfwGetTime();
 
-    double deltaTickTime = currentTime - lastTickTime;
-    if (deltaTickTime >= targetTickTime) {
+    double delta_tick_time = game.current_time - game.last_tick_time;
+    if (delta_tick_time >= game.target_tick_time) {
       // update_player_position(&game, (float)deltaTickTime);
       // Force the update to be one tick
-      update_player_position(&game, (float)(1.0 / TICKS_PER_SECOND));
-      lastTickTime = currentTime;
-      if (mcapi_get_state(game.conn) == MCAPI_STATE_PLAY) {
-        float yaw = -atan2(game.look[0], game.look[2]) / GLM_PIf * 180.0f;
-        if (yaw < 0.0f) {
-          yaw += 360.0f;
-        }
-        float pitch = -game.elevation * 180.0f / GLM_PIf;
-        mcapi_send_set_player_position_and_rotation(
-          game.conn,
-          (mcapiSetPlayerPositionAndRotationPacket){
-            .x = game.position[0],
-            .y = game.position[1],
-            .z = game.position[2],
-            .yaw = yaw,
-            .pitch = pitch,
-            .on_ground = true,
-          }
-        );
-      }
+      update_player_position((float)(1.0 / TICKS_PER_SECOND));
+      game.last_tick_time = game.current_time;
     }
 
-    double deltaRenderTime = currentTime - lastRenderTime;
-    if (deltaRenderTime < targetRenderTime) {
+    double delta_render_time = game.current_time - game.last_render_time;
+    if (delta_render_time < game.target_render_time) {
       continue;
     }
-    lastRenderTime = currentTime;
+    game.last_render_time = game.current_time;
 
-    // Interpolate between last and current position for smooth movement
-    vec3 position;
-    glm_vec3_lerp(game.last_position, game.position, (currentTime - lastTickTime) * TICKS_PER_SECOND, position);
-    vec3 eye = {position[0], position[1] + game.eye_height, position[2]};
-
-    vec3 center;
-    glm_vec3_add(eye, game.look, center);
-
-    mat4 view;
-    glm_lookat(eye, center, game.up, view);
-    memcpy(&game.uniforms.view, view, sizeof(view));
-
-    mat4 projection;
-    glm_perspective(
-      GLM_PI_2, (float)game.config.width / (float)game.config.height, 0.01f, 100.0f, projection
-    );
-    memcpy(&game.uniforms.projection, projection, sizeof(projection));
-
-    // Day: 23,961 - 23,999, 0 - 12,039 is at 15
-    // Dusk: 12,040 - 13,670 goes from light 15 to 4
-    // Night: 13,671 - 22,329 is at 4
-    // Dawn: 22,330 - 23,960 goes from light 4 to 15
-    float sky_max = 15.0f;
-    int time = game.time_of_day % 24000;
-    if (time > 12040 && time < 13670) {
-      sky_max = 4.0f + (15.0f - 4.0f) * (13670.0f - time) / (13670.0f - 12040.0f);
-    } else if (time > 13670 && time < 22330) {
-      sky_max = 4.0f;
-    } else if (time > 22330 && time < 23960) {
-      sky_max = 4.0f + (15.0f - 4.0f) * (time - 22330.0f) / (23960.0f - 22330.0f);
-    }
-
-    game.uniforms.internal_sky_max = sky_max / 15.0f;
-    float sky_color_scale = pow(glm_clamp((sky_max - 4.0) / 11.0, 0.0, 1.0), 3.0);
-
-    // Send uniforms to GPU
-    wgpuQueueWriteBuffer(game.queue, game.uniform_buffer, 0, &game.uniforms, sizeof(game.uniforms));
-
-    WGPUSurfaceTexture surface_texture;
-    wgpuSurfaceGetCurrentTexture(game.surface, &surface_texture);
-    switch (surface_texture.status) {
-      case WGPUSurfaceGetCurrentTextureStatus_Success:
-        // All good, could check for `surface_texture.suboptimal` here.
-        break;
-      case WGPUSurfaceGetCurrentTextureStatus_Timeout:
-      case WGPUSurfaceGetCurrentTextureStatus_Outdated:
-      case WGPUSurfaceGetCurrentTextureStatus_Lost: {
-        // Skip this frame, and re-configure surface.
-        if (surface_texture.texture != NULL) {
-          wgpuTextureRelease(surface_texture.texture);
-        }
-        int width, height;
-        glfwGetWindowSize(game.window, &width, &height);
-        if (width != 0 && height != 0) {
-          update_window_size(&game, width, height);
-        }
-        continue;
-      }
-      case WGPUSurfaceGetCurrentTextureStatus_OutOfMemory:
-      case WGPUSurfaceGetCurrentTextureStatus_DeviceLost:
-      case WGPUSurfaceGetCurrentTextureStatus_Force32:
-        // Fatal error
-        printf(LOG_PREFIX " get_current_texture status=%#.8x\n", surface_texture.status);
-        abort();
-    }
-    assert(surface_texture.texture);
-
-    WGPUTextureView frame = wgpuTextureCreateView(surface_texture.texture, NULL);
-    assert(frame);
-
-    WGPUTextureView depth_frame = wgpuTextureCreateView(game.depth_texture, NULL);
-    assert(depth_frame);
-
-    WGPUCommandEncoder command_encoder = wgpuDeviceCreateCommandEncoder(
-      game.device,
-      &(const WGPUCommandEncoderDescriptor){
-        .label = "command_encoder",
-      }
-    );
-    assert(command_encoder);
-
-    vec3 sky_color;
-    world_get_sky_color(&game.world, game.position, game.biome_info, sky_color);
-
-    WGPURenderPassEncoder render_pass_encoder =
-      wgpuCommandEncoderBeginRenderPass(
-        command_encoder,
-        &(const WGPURenderPassDescriptor){
-          .label = "render_pass_encoder",
-          .colorAttachmentCount = 1,
-          .colorAttachments = (const WGPURenderPassColorAttachment[]){
-            (const WGPURenderPassColorAttachment){
-              .view = frame,
-              .loadOp = WGPULoadOp_Clear,
-              .storeOp = WGPUStoreOp_Store,
-              //  .depthSlice = WGPU_DEPTH_SLICE_UNDEFINED,
-              .clearValue = (const WGPUColor){
-                .r = pow(sky_color[0] * sky_color_scale, 2.2),
-                .g = pow(sky_color[1] * sky_color_scale, 2.2),
-                .b = pow(sky_color[2] * sky_color_scale, 2.2),
-                // .r = pow(0.431, 2.2),
-                // .g = pow(0.694, 2.2),
-                // .b = pow(1.000, 2.2),
-                .a = 1.0,
-              },
-            },
-          },
-          .depthStencilAttachment = &(WGPURenderPassDepthStencilAttachment){
-            .view = depth_frame,
-            .depthClearValue = 1.0f,
-            .depthLoadOp = WGPULoadOp_Clear,
-            .depthStoreOp = WGPUStoreOp_Store,
-          },
-        }
-      );
-    assert(render_pass_encoder);
-
-    wgpuRenderPassEncoderSetIndexBuffer(render_pass_encoder, game.index_buffer, WGPUIndexFormat_Uint32, 0, WGPU_WHOLE_SIZE);
-    wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, game.bind_group, 0, NULL);
-    wgpuRenderPassEncoderSetPipeline(render_pass_encoder, game.render_pipeline);
-
-    for (int ci = 0; ci < MAX_CHUNKS; ci += 1) {
-      Chunk *chunk = game.world.chunks[ci];
-      if (chunk == NULL) {
-        continue;
-      }
-      for (int s = 0; s < 24; s += 1) {
-        if (chunk->sections[s].num_quads == 0) {
-          continue;
-        }
-        wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, chunk->sections[s].vertex_buffer, 0, WGPU_WHOLE_SIZE);
-        wgpuRenderPassEncoderDrawIndexed(render_pass_encoder, chunk->sections[s].num_quads * 6, 1, 0, 0, 0);
-      }
-    }
-
-    wgpuRenderPassEncoderEnd(render_pass_encoder);
-
-    WGPUCommandBuffer command_buffer = wgpuCommandEncoderFinish(
-      command_encoder,
-      &(const WGPUCommandBufferDescriptor){
-        .label = "command_buffer",
-      }
-    );
-    assert(command_buffer);
-
-    wgpuQueueSubmit(game.queue, 1, (const WGPUCommandBuffer[]){command_buffer});
-    wgpuSurfacePresent(game.surface);
-
-    wgpuCommandBufferRelease(command_buffer);
-    wgpuRenderPassEncoderRelease(render_pass_encoder);
-    wgpuCommandEncoderRelease(command_encoder);
-    wgpuTextureViewRelease(frame);
-    wgpuTextureViewRelease(depth_frame);
-    wgpuTextureRelease(surface_texture.texture);
+    chunk_renderer_render();
   }
 
   // Free chunks
