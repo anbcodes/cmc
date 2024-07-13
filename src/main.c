@@ -41,6 +41,19 @@ typedef struct Uniforms {
   float internal_sky_max;
 } Uniforms;
 
+typedef struct SkyUniforms {
+  float time;
+} SkyUniforms;
+
+typedef struct SkyRenderer {
+  WGPUShaderModule shader_module;
+  WGPURenderPipeline render_pipeline;
+  WGPUPipelineLayout pipeline_layout;
+  WGPUBuffer uniform_buffer;
+  SkyUniforms uniforms;
+  WGPUBuffer vertex_buffer;
+} SkyRenderer;
+
 typedef struct Game {
   WGPUInstance instance;
   WGPUSurface surface;
@@ -58,6 +71,7 @@ typedef struct Game {
   Uniforms uniforms;
   WGPUPipelineLayout pipeline_layout;
   WGPUShaderModule shader_module;
+  SkyRenderer sky_renderer;
   GLFWwindow *window;
   float eye_height;
   vec3 size;
@@ -948,10 +962,6 @@ void chunk_renderer_init() {
   );
   assert(game.pipeline_layout);
 
-  wgpuSurfaceGetCapabilities(game.surface, game.adapter, &game.surface_capabilities);
-
-  WGPUTextureFormat surface_format = game.surface_capabilities.formats[0];
-
   game.render_pipeline = wgpuDeviceCreateRenderPipeline(
     game.device,
     &(const WGPURenderPipelineDescriptor){
@@ -977,7 +987,7 @@ void chunk_renderer_init() {
         .targetCount = 1,
         .targets = (const WGPUColorTargetState[]){
           (const WGPUColorTargetState){
-            .format = surface_format,
+            .format = game.surface_capabilities.formats[0],
             .writeMask = WGPUColorWriteMask_All,
           },
         },
@@ -1013,7 +1023,7 @@ void chunk_renderer_init() {
   game.config = (const WGPUSurfaceConfiguration){
     .device = game.device,
     .usage = WGPUTextureUsage_RenderAttachment,
-    .format = surface_format,
+    .format = game.surface_capabilities.formats[0],
     .presentMode = WGPUPresentMode_Fifo,
     .alphaMode = game.surface_capabilities.alphaModes[0],
   };
@@ -1172,6 +1182,222 @@ void chunk_renderer_render() {
     command_encoder,
     &(const WGPUCommandBufferDescriptor){
       .label = "command_buffer",
+    }
+  );
+  assert(command_buffer);
+
+  wgpuQueueSubmit(game.queue, 1, (const WGPUCommandBuffer[]){command_buffer});
+  wgpuSurfacePresent(game.surface);
+
+  wgpuCommandBufferRelease(command_buffer);
+  wgpuRenderPassEncoderRelease(render_pass_encoder);
+  wgpuCommandEncoderRelease(command_encoder);
+  wgpuTextureViewRelease(frame);
+  wgpuTextureViewRelease(depth_frame);
+  wgpuTextureRelease(surface_texture.texture);
+}
+
+void sky_renderer_init() {
+  game.sky_renderer.shader_module =
+    frmwrk_load_shader_module(game.device, "sky.wgsl");
+  assert(game.sky_renderer.shader_module);
+
+  game.sky_renderer.uniform_buffer = frmwrk_device_create_buffer_init(
+    game.device,
+    &(const frmwrk_buffer_init_descriptor){
+      .label = "Uniform Buffer",
+      .content = (void *)&game.sky_renderer.uniforms,
+      .content_size = sizeof(game.sky_renderer.uniforms),
+      .usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst,
+    }
+  );
+
+  float quad[] = {
+    -1.0f, -1.0f,
+    1.0f, -1.0f,
+    1.0f, 1.0f,
+    1.0f, -1.0f,
+    1.0f, 1.0f,
+    -1.0f, 1.0f,
+  };
+
+  game.sky_renderer.vertex_buffer = frmwrk_device_create_buffer_init(
+    game.device,
+    &(const frmwrk_buffer_init_descriptor){
+      .label = "Sky Vertex Buffer",
+      .content = (void *)quad,
+      .content_size = 6 * 2 * sizeof(float),
+      .usage = WGPUBufferUsage_Vertex,
+    }
+  );
+
+  WGPUBindGroupLayoutEntry bgl_entries[] = {
+    [0] = {
+      .binding = 0,
+      .visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment,
+      .buffer = {
+        .type = WGPUBufferBindingType_Uniform,
+      },
+    },
+  };
+
+  WGPUBindGroupLayoutDescriptor bgl_desc = {
+    .entryCount = sizeof(bgl_entries) / sizeof(bgl_entries[0]),
+    .entries = bgl_entries,
+  };
+
+  WGPUBindGroupLayout bgl = wgpuDeviceCreateBindGroupLayout(game.device, &bgl_desc);
+
+  WGPUBindGroupEntry bg_entries[] = {
+    [0] = {
+      .binding = 0,
+      .buffer = game.sky_renderer.uniform_buffer,
+      .size = sizeof(game.sky_renderer.uniforms),
+    },
+  };
+  WGPUBindGroupDescriptor bg_desc = {
+    .layout = bgl,
+    .entryCount = sizeof(bg_entries) / sizeof(bg_entries[0]),
+    .entries = bg_entries,
+  };
+  game.bind_group = wgpuDeviceCreateBindGroup(game.device, &bg_desc);
+
+  static const WGPUVertexAttribute vertex_attributes[] = {
+    {
+      .format = WGPUVertexFormat_Float32x2,
+      .offset = 0,
+      .shaderLocation = 0,
+    },
+  };
+
+  game.sky_renderer.pipeline_layout = wgpuDeviceCreatePipelineLayout(
+    game.device,
+    &(const WGPUPipelineLayoutDescriptor){
+      .label = "game.pipeline_layout",
+      .bindGroupLayoutCount = 1,
+      .bindGroupLayouts = (const WGPUBindGroupLayout[]){
+        bgl,
+      },
+    }
+  );
+  assert(game.sky_renderer.pipeline_layout);
+
+  game.sky_renderer.render_pipeline = wgpuDeviceCreateRenderPipeline(
+    game.device,
+    &(const WGPURenderPipelineDescriptor){
+      .label = "Sky Render Pipeline",
+      .layout = game.sky_renderer.pipeline_layout,
+      .vertex = (const WGPUVertexState){
+        .module = game.sky_renderer.shader_module,
+        .entryPoint = "vs_main",
+        .bufferCount = 1,
+        .buffers = (const WGPUVertexBufferLayout[]){
+          (const WGPUVertexBufferLayout){
+            .arrayStride = 2 * sizeof(float),
+            .stepMode = WGPUVertexStepMode_Vertex,
+            .attributeCount = sizeof(vertex_attributes) /
+                              sizeof(vertex_attributes[0]),
+            .attributes = vertex_attributes,
+          },
+        },
+      },
+      .fragment = &(const WGPUFragmentState){
+        .module = game.sky_renderer.shader_module,
+        .entryPoint = "fs_main",
+        .targetCount = 1,
+        .targets = (const WGPUColorTargetState[]){
+          (const WGPUColorTargetState){
+            .format = game.surface_capabilities.formats[0],
+            .writeMask = WGPUColorWriteMask_All,
+          },
+        },
+      },
+      .primitive = (const WGPUPrimitiveState){
+        .topology = WGPUPrimitiveTopology_TriangleList,
+      },
+      .multisample = (const WGPUMultisampleState){
+        .count = 1,
+        .mask = 0xFFFFFFFF,
+      },
+      .depthStencil = &(WGPUDepthStencilState){
+        .depthWriteEnabled = true,
+        .depthCompare = WGPUCompareFunction_Less,
+        .format = WGPUTextureFormat_Depth24Plus,
+        .stencilBack = (WGPUStencilFaceState){
+          .compare = WGPUCompareFunction_Always,
+          .failOp = WGPUStencilOperation_Replace,
+          .depthFailOp = WGPUStencilOperation_Replace,
+          .passOp = WGPUStencilOperation_Replace,
+        },
+        .stencilFront = (WGPUStencilFaceState){
+          .compare = WGPUCompareFunction_Always,
+          .failOp = WGPUStencilOperation_Replace,
+          .depthFailOp = WGPUStencilOperation_Replace,
+          .passOp = WGPUStencilOperation_Replace,
+        },
+      },
+    }
+  );
+  assert(game.sky_renderer.render_pipeline);
+}
+
+void sky_renderer_render() {
+  game.sky_renderer.uniforms.time = 0.5f;
+
+  // Send uniforms to GPU
+  wgpuQueueWriteBuffer(game.queue, game.sky_renderer.uniform_buffer, 0, &game.sky_renderer.uniforms, sizeof(game.sky_renderer.uniforms));
+
+  WGPUSurfaceTexture surface_texture;
+  wgpuSurfaceGetCurrentTexture(game.surface, &surface_texture);
+
+  WGPUTextureView frame = wgpuTextureCreateView(surface_texture.texture, NULL);
+  assert(frame);
+
+  WGPUTextureView depth_frame = wgpuTextureCreateView(game.depth_texture, NULL);
+  assert(depth_frame);
+
+  WGPUCommandEncoder command_encoder = wgpuDeviceCreateCommandEncoder(
+    game.device,
+    &(const WGPUCommandEncoderDescriptor){
+      .label = "sky command_encoder",
+    }
+  );
+  assert(command_encoder);
+
+  WGPURenderPassEncoder render_pass_encoder =
+    wgpuCommandEncoderBeginRenderPass(
+      command_encoder,
+      &(const WGPURenderPassDescriptor){
+        .label = "sky render_pass_encoder",
+        .colorAttachmentCount = 1,
+        .colorAttachments = (const WGPURenderPassColorAttachment[]){
+          (const WGPURenderPassColorAttachment){
+            .view = frame,
+            .loadOp = WGPULoadOp_Load,
+            .storeOp = WGPUStoreOp_Store,
+          },
+        },
+        .depthStencilAttachment = &(WGPURenderPassDepthStencilAttachment){
+          .view = depth_frame,
+          .depthLoadOp = WGPULoadOp_Load,
+          .depthStoreOp = WGPUStoreOp_Discard,
+        },
+      }
+    );
+  assert(render_pass_encoder);
+
+  wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, game.bind_group, 0, NULL);
+  wgpuRenderPassEncoderSetPipeline(render_pass_encoder, game.sky_renderer.render_pipeline);
+
+  wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, game.sky_renderer.vertex_buffer, 0, WGPU_WHOLE_SIZE);
+  wgpuRenderPassEncoderDraw(render_pass_encoder, 6, 1, 0, 0);
+
+  wgpuRenderPassEncoderEnd(render_pass_encoder);
+
+  WGPUCommandBuffer command_buffer = wgpuCommandEncoderFinish(
+    command_encoder,
+    &(const WGPUCommandBufferDescriptor){
+      .label = "sky command_buffer",
     }
   );
   assert(command_buffer);
@@ -1437,6 +1663,27 @@ void init_surface() {
 
   game.queue = wgpuDeviceGetQueue(game.device);
   assert(game.queue);
+
+  wgpuSurfaceGetCapabilities(game.surface, game.adapter, &game.surface_capabilities);
+
+  game.config = (const WGPUSurfaceConfiguration){
+    .device = game.device,
+    .usage = WGPUTextureUsage_RenderAttachment,
+    .format = game.surface_capabilities.formats[0],
+    .presentMode = WGPUPresentMode_Fifo,
+    .alphaMode = game.surface_capabilities.alphaModes[0],
+  };
+
+  game.depth_texture_descriptor = (WGPUTextureDescriptor){
+    .usage = WGPUTextureUsage_RenderAttachment,
+    .dimension = WGPUTextureDimension_2D,
+    .size = {
+      .depthOrArrayLayers = 1,
+    },
+    .format = WGPUTextureFormat_Depth24Plus,
+    .mipLevelCount = 1,
+    .sampleCount = 1,
+  };
 }
 
 int main(int argc, char *argv[]) {
@@ -1459,16 +1706,12 @@ int main(int argc, char *argv[]) {
   unsigned short port = _port;
 
   init_mcapi(server_ip, port, uuid, access_token, username);
-
   frmwrk_setup_logging(WGPULogLevel_Warn);
-
   load_block_models();
-
   init_glfw();
-
   init_surface();
-
   chunk_renderer_init();
+  // sky_renderer_init();
 
   int width, height;
   glfwGetWindowSize(game.window, &width, &height);
@@ -1500,6 +1743,7 @@ int main(int argc, char *argv[]) {
     }
     game.last_render_time = game.current_time;
 
+    // sky_renderer_render();
     chunk_renderer_render();
   }
 
