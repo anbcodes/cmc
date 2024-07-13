@@ -4,27 +4,16 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "../cglm/include/cglm/cglm.h"
+#include "cglm/cglm.h"
+#include "datatypes.h"
+
+typedef struct NBT NBT;
 
 typedef enum mcapiConnState { MCAPI_STATE_INIT = 0,
                               MCAPI_STATE_STATUS = 1,
                               MCAPI_STATE_LOGIN = 2,
                               MCAPI_STATE_CONFIG = 3,
                               MCAPI_STATE_PLAY = 4 } mcapiConnState;
-
-typedef struct mcapiBuffer {
-  uint8_t* ptr;
-  size_t len;
-} mcapiBuffer;
-
-mcapiBuffer mcapi_create_buffer(size_t len);
-void mcapi_destroy_buffer(mcapiBuffer buffer);
-void mcapi_print_buf(mcapiBuffer str);
-
-typedef mcapiBuffer mcapiString;
-
-mcapiString mcapi_to_string(char* c_str);
-void mcapi_print_str(mcapiString str);
 
 typedef struct mcapiConnection mcapiConnection;
 
@@ -34,79 +23,22 @@ void mcapi_destroy_connection(mcapiConnection* conn);
 void mcapi_set_state(mcapiConnection* conn, mcapiConnState state);
 mcapiConnState mcapi_get_state(mcapiConnection* conn);
 
-typedef struct mcapiUUID {
-  uint64_t upper;
-  uint64_t lower;
-} mcapiUUID;
-
-typedef enum mcapiNBTTagType {
-  MCAPI_NBT_END = 0x00,
-  MCAPI_NBT_BYTE,
-  MCAPI_NBT_SHORT,
-  MCAPI_NBT_INT,
-  MCAPI_NBT_LONG,
-  MCAPI_NBT_FLOAT,
-  MCAPI_NBT_DOUBLE,
-  MCAPI_NBT_BYTE_ARRAY,
-  MCAPI_NBT_STRING,
-  MCAPI_NBT_LIST,
-  MCAPI_NBT_COMPOUND,
-  MCAPI_NBT_INT_ARRAY,
-  MCAPI_NBT_LONG_ARRAY,
-} mcapiNBTTagType;
-
-typedef struct mcapiNBT mcapiNBT;
-
-typedef struct mcapiNBT {
-  mcapiNBTTagType type;
-  mcapiString name;
-
-  union {
-    uint8_t byte_value;
-    uint16_t short_value;
-    uint32_t int_value;
-    uint64_t long_value;
-    float float_value;
-    double double_value;
-    mcapiBuffer byte_array_value;
-    mcapiString string_value;
-    struct mcapi_nbt_list {
-      int size;
-      mcapiNBT* items;
-    } list_value;
-    struct mcapi_nbt_compound {
-      int count;
-      mcapiNBT* children;
-    } compound_value;
-    struct mcapi_nbt_int_array {
-      int size;
-      int* data;
-    } int_array_value;
-    struct mcapi_nbt_long_array {
-      int size;
-      long* data;
-    } long_array_value;
-  };
-} mcapiNBT;
-
-mcapiNBT* mcapi_nbt_get_compound_tag(mcapiNBT* nbt, char* name);
-
 typedef struct mcapiHandshakePacket {
-  int protocol_version;     // See protocol version numbers https://wiki.vg/Protocol_version_numbers
-  mcapiString server_addr;  // Hostname or IP, e.g. localhost or 127.0.0.1, that was used to connect. The
-                            // Notchian server does not use this information. Note that SRV records are a
-                            // simple redirect, e.g. if _minecraft._tcp.example.com points to
-                            // mc.example.org, users connecting to example.com will provide example.org as
-                            // server address in addition to connecting to it.
-  short server_port;        // Default is 25565. The Notchian server does not use this information.
-  int next_state;           // 1 for Status, 2 for Login.
+  int protocol_version;  // See protocol version numbers https://wiki.vg/Protocol_version_numbers
+  String server_addr;    // Hostname or IP, e.g. localhost or 127.0.0.1, that was used to connect. The
+                         // Notchian server does not use this information. Note that SRV records are a
+                         // simple redirect, e.g. if _minecraft._tcp.example.com points to
+                         // mc.example.org, users connecting to example.com will provide example.org as
+                         // server address in addition to connecting to it.
+  short server_port;     // Default is 25565. The Notchian server does not use this information.
+  int next_state;        // 1 for Status, 2 for Login.
 } mcapiHandshakePacket;
 
 void mcapi_send_handshake(mcapiConnection* conn, mcapiHandshakePacket packet);
 
 typedef struct mcapiLoginStartPacket {
-  mcapiString username;  // Player's Username.
-  mcapiUUID uuid;        // The UUID of the player logging in. Unused by the Notchian server.
+  String username;  // Player's Username.
+  UUID uuid;        // The UUID of the player logging in. Unused by the Notchian server.
 } mcapiLoginStartPacket;
 
 void mcapi_send_login_start(mcapiConnection* conn, mcapiLoginStartPacket packet);
@@ -114,9 +46,9 @@ void mcapi_send_login_start(mcapiConnection* conn, mcapiLoginStartPacket packet)
 void mcapi_send_login_acknowledged(mcapiConnection* conn);
 
 typedef struct mcapiKnownPack {
-  mcapiString namespace;
-  mcapiString id;
-  mcapiString version;
+  String namespace;
+  String id;
+  String version;
 } mcapiKnownPack;
 
 typedef struct mcapiServerboundKnownPacksPacket {
@@ -179,15 +111,15 @@ void mcapi_send_player_action(mcapiConnection* conn, mcapiPlayerActionPacket pac
 // -- Callbacks --
 
 typedef struct mcapiLoginSuccessProperty {
-  mcapiString name;
-  mcapiString value;
+  String name;
+  String value;
   bool isSigned;
-  mcapiString signature;  // Only if Is Signed is true.
+  String signature;  // Only if Is Signed is true.
 } mcapiLoginSuccessProperty;
 
 typedef struct mcapiLoginSuccessPacket {
-  mcapiUUID uuid;
-  mcapiString username;
+  UUID uuid;
+  String username;
   int number_of_properties;  // Number of elements in the following array.
   mcapiLoginSuccessProperty* properties;
   bool strict_error_handling;  // Whether the client should immediately disconnect upon a packet
@@ -202,7 +134,7 @@ void mcapi_set_finish_config_cb(mcapiConnection* conn, void (*cb)(mcapiConnectio
 typedef struct mcapiSetBlockDestroyStagePacket {
   int entity_id;
   ivec3 position;
-  int8_t stage; // 0–9 to set it, any other value to remove it. 
+  int8_t stage;  // 0–9 to set it, any other value to remove it.
 } mcapiSetBlockDestroyStagePacket;
 
 void mcapi_set_block_destroy_stage_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiSetBlockDestroyStagePacket));
@@ -215,25 +147,20 @@ typedef struct mcapiClientboundKnownPacksPacket {
 void mcapi_set_clientbound_known_packs_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiClientboundKnownPacksPacket));
 
 typedef struct mcapiRegistryDataPacket {
-  mcapiString id;
+  String id;
   int entry_count;
-  mcapiString* entry_names;
-  mcapiNBT** entries;
+  String* entry_names;
+  NBT** entries;
 } mcapiRegistryDataPacket;
 
 void mcapi_set_registry_data_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiRegistryDataPacket));
-
-typedef struct mcapiBitSet {
-  int length;
-  uint64_t* data;
-} mcapiBitSet;
 
 typedef struct mcapiBlockEntity {
   uint8_t x;
   uint8_t z;
   short y;
   int type;
-  mcapiNBT* data;
+  NBT* data;
 } mcapiBlockEntity;
 
 typedef struct mcapiChunkSection {
@@ -245,7 +172,7 @@ typedef struct mcapiChunkSection {
 typedef struct mcapiChunkAndLightDataPacket {
   int chunk_x;
   int chunk_z;
-  mcapiNBT* heightmaps;
+  NBT* heightmaps;
   int chunk_section_count;
   mcapiChunkSection* chunk_sections;
   int block_entity_count;

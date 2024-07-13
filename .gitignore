@@ -8,3 +8,4 @@ build
 run-with-token*.sh
 callgrind*
 out.txt
+.vscode

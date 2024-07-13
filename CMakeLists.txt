@@ -10,6 +10,9 @@ add_executable(cmc src/main.c
   src/framework.c
   src/chunk.c
   src/mcapi.c
+  src/nbt.c
+  src/datatypes.c
+  src/protocol.c
   src/cJSON.c
   src/lodepng/lodepng.c
 )

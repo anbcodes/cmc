@@ -7,9 +7,11 @@
 #include "cJSON.h"
 #include "cglm/cglm.h"
 #include "chunk.h"
+#include "datatypes.h"
 #include "framework.h"
 #include "lodepng/lodepng.h"
 #include "mcapi.h"
+#include "nbt.h"
 #include "wgpu.h"
 
 #if defined(GLFW_EXPOSE_NATIVE_COCOA)
@@ -287,11 +289,11 @@ static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int act
           case GLFW_MOUSE_BUTTON_LEFT:
             world_set_block(&game.world, target, 0, game.block_info, game.biome_info, game.device);
             mcapi_send_player_action(game.conn, (mcapiPlayerActionPacket){
-                                                   .face = MCAPI_FACE_EAST,
-                                                   .position = {target[0], target[1], target[2]},
-                                                   .status = MCAPI_ACTION_DIG_START,
-                                                   .sequence_num = seq_num,
-                                                 });
+                                                  .face = MCAPI_FACE_EAST,
+                                                  .position = {target[0], target[1], target[2]},
+                                                  .status = MCAPI_ACTION_DIG_START,
+                                                  .sequence_num = seq_num,
+                                                });
             seq_num++;
             break;
           case GLFW_MOUSE_BUTTON_RIGHT:
@@ -507,14 +509,14 @@ void update_player_position(float dt) {
 
 void on_login_success(mcapiConnection *conn, mcapiLoginSuccessPacket packet) {
   printf("Username: ");
-  mcapi_print_str(packet.username);
+  print_string(packet.username);
   printf("\nUUID: %016lx%016lx\n", packet.uuid.upper, packet.uuid.lower);
   printf("%d Properties:\n", packet.number_of_properties);
   for (int i = 0; i < packet.number_of_properties; i++) {
     printf("  ");
-    mcapi_print_str(packet.properties[i].name);
+    print_string(packet.properties[i].name);
     printf(": ");
-    mcapi_print_str(packet.properties[i].value);
+    print_string(packet.properties[i].value);
     printf("\n");
   }
 
@@ -550,13 +552,13 @@ void on_registry(mcapiConnection *conn, mcapiRegistryDataPacket packet) {
     assert(height == 256);
     for (int i = 0; i < packet.entry_count; i++) {
       BiomeInfo info = {0};
-      info.temperature = mcapi_nbt_get_compound_tag(packet.entries[i], "temperature")->float_value;
-      info.downfall = mcapi_nbt_get_compound_tag(packet.entries[i], "downfall")->float_value;
-      mcapiNBT *effects = mcapi_nbt_get_compound_tag(packet.entries[i], "effects");
-      int_to_rgb(mcapi_nbt_get_compound_tag(effects, "fog_color")->int_value, info.fog_color);
-      int_to_rgb(mcapi_nbt_get_compound_tag(effects, "water_color")->int_value, info.water_color);
-      int_to_rgb(mcapi_nbt_get_compound_tag(effects, "water_fog_color")->int_value, info.water_fog_color);
-      int_to_rgb(mcapi_nbt_get_compound_tag(effects, "sky_color")->int_value, info.sky_color);
+      info.temperature = nbt_get_compound_tag(packet.entries[i], "temperature")->float_value;
+      info.downfall = nbt_get_compound_tag(packet.entries[i], "downfall")->float_value;
+      NBT *effects = nbt_get_compound_tag(packet.entries[i], "effects");
+      int_to_rgb(nbt_get_compound_tag(effects, "fog_color")->int_value, info.fog_color);
+      int_to_rgb(nbt_get_compound_tag(effects, "water_color")->int_value, info.water_color);
+      int_to_rgb(nbt_get_compound_tag(effects, "water_fog_color")->int_value, info.water_fog_color);
+      int_to_rgb(nbt_get_compound_tag(effects, "sky_color")->int_value, info.sky_color);
 
       float clamped_temperature = glm_clamp(info.temperature, 0.0f, 1.0f);
       float clamped_downfall = glm_clamp(info.downfall, 0.0f, 1.0f);
@@ -564,7 +566,7 @@ void on_registry(mcapiConnection *conn, mcapiRegistryDataPacket packet) {
       int x_index = 255 - (int)(clamped_temperature * 255);
       int y_index = 255 - (int)(clamped_downfall * 255);
       int index = y_index * 256 + x_index;
-      mcapiNBT *grass_color = mcapi_nbt_get_compound_tag(effects, "grass_color");
+      NBT *grass_color = nbt_get_compound_tag(effects, "grass_color");
       if (grass_color != NULL) {
         info.custom_grass_color = true;
         int_to_rgb(grass_color->int_value, info.grass_color);
@@ -573,7 +575,7 @@ void on_registry(mcapiConnection *conn, mcapiRegistryDataPacket packet) {
         info.grass_color[1] = grass[index * 4 + 1] / 255.0f;
         info.grass_color[2] = grass[index * 4 + 2] / 255.0f;
       }
-      mcapiNBT *foliage_color = mcapi_nbt_get_compound_tag(effects, "foliage_color");
+      NBT *foliage_color = nbt_get_compound_tag(effects, "foliage_color");
       if (foliage_color != NULL) {
         info.custom_foliage_color = true;
         int_to_rgb(foliage_color->int_value, info.foliage_color);
@@ -583,7 +585,7 @@ void on_registry(mcapiConnection *conn, mcapiRegistryDataPacket packet) {
         info.foliage_color[2] = foliage[index * 4 + 2] / 255.0f;
       }
       game.biome_info[i] = info;
-      // mcapi_print_str(packet.entry_names[i]);
+      // print_string(packet.entry_names[i]);
       // printf(" %d: %d, temp %f downfall %f x %d y %d color %f %f %f\n", i, info.custom_grass_color, info.temperature, info.downfall, x_index, y_index, info.grass_color[0], info.grass_color[1], info.grass_color[2]);
       // printf("grass %x %x %x\n", grass[index * 4 + 0], grass[index * 4 + 1], grass[index * 4 + 2]);
       // printf("foliage %x %x %x\n", foliage[index * 4 + 0], foliage[index * 4 + 1], foliage[index * 4 + 2]);
@@ -705,8 +707,8 @@ void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char 
   mcapi_send_login_start(
     conn,
     (mcapiLoginStartPacket){
-      .username = mcapi_to_string(username),
-      .uuid = (mcapiUUID){
+      .username = to_string(username),
+      .uuid = (UUID){
         .upper = 0,
         .lower = 0,
       },
@@ -1213,12 +1215,18 @@ void sky_renderer_init() {
   );
 
   float quad[] = {
-    -1.0f, -1.0f,
-    1.0f, -1.0f,
-    1.0f, 1.0f,
-    1.0f, -1.0f,
-    1.0f, 1.0f,
-    -1.0f, 1.0f,
+    -1.0f,
+    -1.0f,
+    1.0f,
+    -1.0f,
+    1.0f,
+    1.0f,
+    1.0f,
+    -1.0f,
+    1.0f,
+    1.0f,
+    -1.0f,
+    1.0f,
   };
 
   game.sky_renderer.vertex_buffer = frmwrk_device_create_buffer_init(

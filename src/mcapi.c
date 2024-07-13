@@ -15,7 +15,10 @@
 #include <string.h>
 
 #include "cglm/cglm.h"
+#include "datatypes.h"
 #include "libdeflate.h"
+#include "nbt.h"
+#include "protocol.h"
 #include "sockets.h"
 
 #define ntohll(x) (((uint64_t)ntohl((x) & 0xFFFFFFFF) << 32) | ntohl((x) >> 32))
@@ -74,12 +77,12 @@ typedef enum PacketType {
   // Play
 
   // Clientbound
-  BUNDLE_DELIMITER = 0x00,                     // Unimplemented
-  SPAWN_ENTITY = 0x01,                         // Unimplemented
-  SPAWN_EXPERIENCE_ORB = 0x02,                 // Unimplemented
-  ENTITY_ANIMATION = 0x03,                     // Unimplemented
-  AWARD_STATISTICS = 0x04,                     // Unimplemented
-  ACKNOWLEDGE_BLOCK_CHANGE = 0x05,             // Unimplemented
+  BUNDLE_DELIMITER = 0x00,          // Unimplemented
+  SPAWN_ENTITY = 0x01,              // Unimplemented
+  SPAWN_EXPERIENCE_ORB = 0x02,      // Unimplemented
+  ENTITY_ANIMATION = 0x03,          // Unimplemented
+  AWARD_STATISTICS = 0x04,          // Unimplemented
+  ACKNOWLEDGE_BLOCK_CHANGE = 0x05,  // Unimplemented
   SET_BLOCK_DESTROY_STAGE = 0x06,
   BLOCK_ENTITY_DATA = 0x07,                    // Unimplemented
   BLOCK_ACTION = 0x08,                         // Unimplemented
@@ -282,23 +285,23 @@ struct mcapiConnection {
   mcapiConnState state;
   int compression_threshold;
 
-  mcapiString uuid;
-  mcapiString access_token;
+  String uuid;
+  String access_token;
 
   bool encryption_enabled;
-  mcapiBuffer shared_secret;
+  Buffer shared_secret;
   EVP_CIPHER_CTX *encrypt_ctx;
   EVP_CIPHER_CTX *decrypt_ctx;
 
-  struct libdeflate_compressor* compressor;
-  struct libdeflate_decompressor* decompressor;
+  struct libdeflate_compressor *compressor;
+  struct libdeflate_decompressor *decompressor;
 
   // Callbacks
 
   // Init
   void (*login_success_cb)(mcapiConnection *, mcapiLoginSuccessPacket);
   void (*finish_config_cb)(mcapiConnection *);
-  void (*set_block_destroy_stage_cb)(mcapiConnection*, mcapiSetBlockDestroyStagePacket);
+  void (*set_block_destroy_stage_cb)(mcapiConnection *, mcapiSetBlockDestroyStagePacket);
   void (*clientbound_known_packs_cb)(mcapiConnection *, mcapiClientboundKnownPacksPacket);
   void (*registry_data_cb)(mcapiConnection *, mcapiRegistryDataPacket);
   void (*chunk_and_light_data_cb)(mcapiConnection *, mcapiChunkAndLightDataPacket);
@@ -364,8 +367,8 @@ mcapiConnection *mcapi_create_connection(char *hostname, short port, char *uuid,
   // OPENSSL_config(NULL);
 
   mcapiConnection *conn = calloc(1, sizeof(mcapiConnection));
-  conn->access_token = mcapi_to_string(access_token);
-  conn->uuid = mcapi_to_string(uuid);
+  conn->access_token = to_string(access_token);
+  conn->uuid = to_string(uuid);
 
   conn->sockfd = sockfd;
 
@@ -378,9 +381,9 @@ mcapiConnection *mcapi_create_connection(char *hostname, short port, char *uuid,
 void mcapi_destroy_connection(mcapiConnection *conn) {
   libdeflate_free_compressor(conn->compressor);
   libdeflate_free_decompressor(conn->decompressor);
-  
+
   close(conn->sockfd);
-  
+
   EVP_cleanup();
   CRYPTO_cleanup_all_ex_data();
   ERR_free_strings();
@@ -394,729 +397,14 @@ mcapiConnState mcapi_get_state(mcapiConnection *conn) {
   return conn->state;
 }
 
-/* --- Buffer --- */
-
-mcapiBuffer mcapi_create_buffer(size_t len) {
-  return (mcapiBuffer){
-    .ptr = malloc(len),
-    .len = len,
-  };
-}
-
-void mcapi_destroy_buffer(const mcapiBuffer buffer) {
-  free(buffer.ptr);
-}
-
-void mcapi_print_buf(mcapiBuffer buf) {
-  for (int i = 0; i < buf.len; i++) {
-    printf("%02x ", buf.ptr[i]);
-  }
-
-  printf("\n");
-}
-
-mcapiString mcapi_to_string(char *c_str) {
-  return (mcapiString){
-    .ptr = c_str,
-    .len = strlen(c_str),
-  };
-}
-
-void mcapi_print_str(mcapiString str) {
-  fflush(stdout);
-  write(STDOUT_FILENO, str.ptr, str.len);
-}
-
-typedef struct ResizeableBuffer {
-  mcapiBuffer buffer;
-  size_t len;
-} ResizeableBuffer;
-
-ResizeableBuffer create_resizeable_buffer() {
-  return (ResizeableBuffer){
-    .buffer = mcapi_create_buffer(16),
-    .len = 0,
-  };
-};
-
-void destroy_resizeable_buffer(const ResizeableBuffer buffer) {
-  mcapi_destroy_buffer(buffer.buffer);
-}
-
-void resizeable_buffer_ensure_capacity(ResizeableBuffer *buf, int capacity) {
-  if (buf->buffer.len < capacity) {
-    // Double the size of the buffer
-    mcapiBuffer old_buf = buf->buffer;
-    int oldlen = buf->buffer.len;
-
-    int newlen = oldlen * 2;
-    while (newlen < capacity) {
-      newlen *= 2;
-    }
-
-    buf->buffer = mcapi_create_buffer(newlen);
-    memcpy(buf->buffer.ptr, old_buf.ptr, oldlen);
-
-    mcapi_destroy_buffer(old_buf);
-  }
-}
-
-mcapiBuffer resizable_buffer_to_buffer(ResizeableBuffer resizeable) {
-  return (mcapiBuffer){
-    .ptr = resizeable.buffer.ptr,
-    .len = resizeable.len,
-  };
-}
-
-typedef struct ReadableBuffer {
-  mcapiBuffer buf;
-  int cursor;  // Location of next read
-} ReadableBuffer;
-
-typedef struct WritableBuffer {
-  ResizeableBuffer buf;
-  int cursor;  // Location of next write
-} WritableBuffer;
-
-ReadableBuffer to_readable_buffer(mcapiBuffer buf) {
-  return (ReadableBuffer){
-    .buf = buf,
-    .cursor = 0,
-  };
-}
-
-WritableBuffer create_writable_buffer() {
-  return (WritableBuffer){
-    .buf = create_resizeable_buffer(),
-    .cursor = 0,
-  };
-}
-
-void destroy_writable_buffer(const WritableBuffer buffer) {
-  destroy_resizeable_buffer(buffer.buf);
-}
-
-/* --- Packet Reader/Writer Code --- */
-
-int SEGMENT_BITS = 0x7F;
-int CONTINUE_BIT = 0x80;
-
-void write_byte(WritableBuffer *io, uint8_t value) {
-  resizeable_buffer_ensure_capacity(&io->buf, io->cursor + 1);
-
-  io->buf.buffer.ptr[io->cursor] = value;
-
-  io->cursor++;
-
-  if (io->cursor > io->buf.len) io->buf.len = io->cursor;
-}
-
-void write_bytes(WritableBuffer *io, void *src, int len) {
-  resizeable_buffer_ensure_capacity(&io->buf, io->cursor + len);
-
-  memcpy(io->buf.buffer.ptr, src, len);
-
-  io->cursor += len;
-  if (io->cursor > io->buf.len) io->buf.len = io->cursor;
-}
-
-void write_buffer(WritableBuffer *io, mcapiBuffer buf) {
-  resizeable_buffer_ensure_capacity(&io->buf, io->cursor + buf.len);
-
-  memcpy(io->buf.buffer.ptr + io->cursor, buf.ptr, buf.len);
-
-  io->cursor += buf.len;
-  if (io->cursor > io->buf.len) io->buf.len = io->cursor;
-}
-
-void write_short(WritableBuffer *io, uint16_t value) {
-  write_byte(io, value >> 8);
-  write_byte(io, value);
-}
-
-void write_int(WritableBuffer *io, int value) {
-  write_byte(io, value >> (8 * 3));
-  write_byte(io, value >> (8 * 2));
-  write_byte(io, value >> (8 * 1));
-  write_byte(io, value >> (8 * 0));
-}
-
-void write_long(WritableBuffer *io, long value) {
-  write_byte(io, value >> (8 * 7));
-  write_byte(io, value >> (8 * 6));
-  write_byte(io, value >> (8 * 5));
-  write_byte(io, value >> (8 * 4));
-  write_byte(io, value >> (8 * 3));
-  write_byte(io, value >> (8 * 2));
-  write_byte(io, value >> (8 * 1));
-  write_byte(io, value >> (8 * 0));
-}
-
-void write_ulong(WritableBuffer *io, uint64_t value) {
-  write_byte(io, value >> (8 * 7));
-  write_byte(io, value >> (8 * 6));
-  write_byte(io, value >> (8 * 5));
-  write_byte(io, value >> (8 * 4));
-  write_byte(io, value >> (8 * 3));
-  write_byte(io, value >> (8 * 2));
-  write_byte(io, value >> (8 * 1));
-  write_byte(io, value >> (8 * 0));
-}
-
-void write_float(WritableBuffer *io, float value) {
-  write_int(io, *(int *)(&value));
-}
-
-void write_double(WritableBuffer *io, double value) {
-  write_long(io, *(long *)(&value));
-}
-
-// From https://github.com/bolderflight/leb128/blob/main/src/leb128.h
-void write_varint(WritableBuffer *io, int value) {
-  // bool negative = (val < 0);
-  // size_t i = 0;
-  // while (1) {
-  //   uint8_t b = val & 0x7F;
-  //   /* Ensure an arithmetic shift */
-  //   val >>= 7;
-  //   if (negative) {
-  //     val |= (~0ULL << 57);
-  //   }
-  //   if (((val == 0) && (!(b & 0x40))) ||
-  //       ((val == -1) && (b & 0x40))) {
-  //     write_byte(io, b);
-  //     return i;
-  //   } else {
-  //     write_byte(io, b | 0x80);
-  //   }
-  // }
-
-  while (true) {
-    if ((value & ~SEGMENT_BITS) == 0) {
-      write_byte(io, value);
-      return;
-    }
-
-    write_byte(io, (value & SEGMENT_BITS) | CONTINUE_BIT);
-
-    // Note: >>> means that the sign bit is shifted with the rest of the number rather than being
-    // left alone
-    value = (int)(((unsigned int)value) >> 7);
-  }
-}
-
-void write_varlong(WritableBuffer *io, long value) {
-  while (true) {
-    if ((value & ~((long)SEGMENT_BITS)) == 0) {
-      write_byte(io, value);
-      return;
-    }
-
-    write_byte(io, (value & SEGMENT_BITS) | CONTINUE_BIT);
-
-    // Note: >>> means that the sign bit is shifted with the rest of the number rather than being
-    // left alone
-    value = (long)(((unsigned long)value) >> 7);
-  }
-}
-
-void write_string(WritableBuffer *io, mcapiString string) {
-  write_varint(io, string.len);
-  // TODO: Speed up by checking whole string length and adding it all at once
-  for (int i = 0; i < string.len; i++) {
-    write_byte(io, string.ptr[i]);
-  }
-}
-
-void write_uuid(WritableBuffer *io, mcapiUUID uuid) {
-  write_byte(io, uuid.upper >> (8 * 7));
-  write_byte(io, uuid.upper >> (8 * 6));
-  write_byte(io, uuid.upper >> (8 * 5));
-  write_byte(io, uuid.upper >> (8 * 4));
-  write_byte(io, uuid.upper >> (8 * 3));
-  write_byte(io, uuid.upper >> (8 * 2));
-  write_byte(io, uuid.upper >> (8 * 1));
-  write_byte(io, uuid.upper >> (8 * 0));
-
-  write_byte(io, uuid.lower >> (8 * 7));
-  write_byte(io, uuid.lower >> (8 * 6));
-  write_byte(io, uuid.lower >> (8 * 5));
-  write_byte(io, uuid.lower >> (8 * 4));
-  write_byte(io, uuid.lower >> (8 * 3));
-  write_byte(io, uuid.lower >> (8 * 2));
-  write_byte(io, uuid.lower >> (8 * 1));
-  write_byte(io, uuid.lower >> (8 * 0));
-}
-
-void write_ipos(WritableBuffer *io, ivec3 pos) {
-  uint64_t packed = (((int64_t)pos[0] & 0x3FFFFFF) << 38) | (((int64_t)pos[2] & 0x3FFFFFF) << 12) | ((int64_t)pos[1] & 0xFFF);
-
-  write_ulong(io, packed);
-}
-// Does not do bounds checking
-uint8_t read_byte(ReadableBuffer *io) {
-  // printf("rb: len=%d, cursor=%d\n", io->buf.len, io->cursor);
-  uint8_t byte = io->buf.ptr[io->cursor];
-  io->cursor++;
-  return byte;
-}
-
-mcapiBuffer read_bytes(ReadableBuffer *io, size_t size) {
-  mcapiBuffer buf = {
-    .ptr = io->buf.ptr + io->cursor,
-    .len = size,
-  };
-
-  io->cursor += size;
-  return buf;
-}
-
-bool has_byte(const ReadableBuffer io) {
-  return io.cursor < io.buf.len;
-}
-
-short read_short(ReadableBuffer *io) {
-  short num = 0;
-  num += (uint16_t)read_byte(io) << 8 * 1;
-  num += (uint16_t)read_byte(io);
-  return num;
-}
-
-uint16_t read_ushort(ReadableBuffer *io) {
-  uint16_t num = 0;
-  num += (uint16_t)read_byte(io) << 8 * 1;
-  num += (uint16_t)read_byte(io);
-  return num;
-}
-
-int read_int(ReadableBuffer *io) {
-  int num = 0;
-  num += (uint32_t)read_byte(io) << 8 * 3;
-  num += (uint32_t)read_byte(io) << 8 * 2;
-  num += (uint32_t)read_byte(io) << 8 * 1;
-  num += (uint32_t)read_byte(io);
-  return num;
-}
-
-int64_t read_long(ReadableBuffer *io) {
-  int64_t num = 0;
-
-  num += (uint64_t)read_byte(io) << 8 * 7;
-  num += (uint64_t)read_byte(io) << 8 * 6;
-  num += (uint64_t)read_byte(io) << 8 * 5;
-  num += (uint64_t)read_byte(io) << 8 * 4;
-  num += (uint64_t)read_byte(io) << 8 * 3;
-  num += (uint64_t)read_byte(io) << 8 * 2;
-  num += (uint64_t)read_byte(io) << 8 * 1;
-  num += (uint64_t)read_byte(io);
-  return num;
-}
-
-uint64_t read_ulong(ReadableBuffer *io) {
-  uint64_t num = 0;
-
-  num += (uint64_t)read_byte(io) << 8 * 7;
-  num += (uint64_t)read_byte(io) << 8 * 6;
-  num += (uint64_t)read_byte(io) << 8 * 5;
-  num += (uint64_t)read_byte(io) << 8 * 4;
-  num += (uint64_t)read_byte(io) << 8 * 3;
-  num += (uint64_t)read_byte(io) << 8 * 2;
-  num += (uint64_t)read_byte(io) << 8 * 1;
-  num += (uint64_t)read_byte(io);
-  return num;
-}
-
-float read_float(ReadableBuffer *io) {
-  int value = read_int(io);
-  return *(float *)(&value);
-}
-
-double read_double(ReadableBuffer *io) {
-  long value = read_long(io);
-  return *(double *)(&value);
-}
-
-// Does not do bounds checking
-// From https://github.com/bolderflight/leb128/blob/main/src/leb128.h
-int read_varint(ReadableBuffer *io) {
-  // int res = 0;
-  // size_t shift = 0;
-
-  // while (1) {
-  //   uint8_t b = read_byte(io);
-  //   int slice = b & 0x7F;
-  //   res |= slice << shift;
-  //   shift += 7;
-  //   if (!(b & 0x80)) {
-  //     if ((shift < 32) && (b & 0x40)) {
-  //       return res | (-1ULL) << shift;
-  //     }
-  //     return res;
-  //   }
-  // }
-
-  int value = 0;
-  int position = 0;
-  uint8_t current_byte;
-
-  while (true) {
-    current_byte = read_byte(io);
-    value |= (current_byte & SEGMENT_BITS) << position;
-
-    if ((current_byte & CONTINUE_BIT) == 0) break;
-
-    position += 7;
-
-    if (position >= 32) break;  // Too big
-  }
-
-  return value;
-}
-
-mcapiBitSet read_bitset(ReadableBuffer *io) {
-  mcapiBitSet bitset = {0};
-  bitset.length = read_varint(io);
-  bitset.data = malloc(sizeof(uint64_t) * bitset.length);
-  for (int i = 0; i < bitset.length; i++) {
-    bitset.data[i] = read_ulong(io);
-  }
-  return bitset;
-}
-
-void * destroy_bitset(mcapiBitSet bs) {
-  free(bs.data);
-}
-
-bool bitset_at(mcapiBitSet bitset, int index) {
-  int word = index / 64;
-  if (word >= bitset.length) {
-    return false;  // Out of bounds (false by default)
-  }
-  int bit = index % 64;
-  return (bitset.data[word] & (1 << bit)) != 0;
-}
-
-bool has_varint(ReadableBuffer io) {
-  int position = 0;
-  uint8_t current_byte;
-
-  while (has_byte(io)) {
-    current_byte = read_byte(&io);
-
-    if ((current_byte & CONTINUE_BIT) == 0) return true;
-
-    position += 7;
-
-    if (position >= 32) break;  // Too big
-  }
-
-  return false;
-}
-
-long read_varlong(ReadableBuffer *io) {
-  long value = 0;
-  int position = 0;
-  uint8_t current_byte;
-
-  while (true) {
-    current_byte = read_byte(io);
-    value |= (long)(current_byte & SEGMENT_BITS) << position;
-
-    if ((current_byte & CONTINUE_BIT) == 0) break;
-
-    position += 7;
-
-    if (position >= 64) break;  // Too big
-  }
-
-  return value;
-}
-
-bool has_varlong(ReadableBuffer io) {
-  int position = 0;
-  uint8_t current_byte;
-
-  while (has_byte(io)) {
-    current_byte = read_byte(&io);
-
-    if ((current_byte & CONTINUE_BIT) == 0) return true;
-
-    position += 7;
-
-    if (position >= 64) break;  // Too big
-  }
-
-  return false;
-}
-
-mcapiString read_string(ReadableBuffer *io) {
-  int len = read_varint(io);
-
-  mcapiString res = {
-    .len = len,
-    .ptr = io->buf.ptr + io->cursor,
-  };
-
-  // printf("rs: len=%ld, cursor=%d, slen=%d\n", io->buf.len, io->cursor, len);
-  io->cursor += len;
-
-  return res;
-}
-
-mcapiUUID read_uuid(ReadableBuffer *io) {
-  mcapiUUID uuid = {};
-  uuid.upper += (u_int64_t)read_byte(io) << 8 * 7;
-  uuid.upper += (u_int64_t)read_byte(io) << 8 * 6;
-  uuid.upper += (u_int64_t)read_byte(io) << 8 * 5;
-  uuid.upper += (u_int64_t)read_byte(io) << 8 * 4;
-  uuid.upper += (u_int64_t)read_byte(io) << 8 * 3;
-  uuid.upper += (u_int64_t)read_byte(io) << 8 * 2;
-  uuid.upper += (u_int64_t)read_byte(io) << 8 * 1;
-  uuid.upper += (u_int64_t)read_byte(io);
-
-  uuid.lower += (u_int64_t)read_byte(io) << 8 * 7;
-  uuid.lower += (u_int64_t)read_byte(io) << 8 * 6;
-  uuid.lower += (u_int64_t)read_byte(io) << 8 * 5;
-  uuid.lower += (u_int64_t)read_byte(io) << 8 * 4;
-  uuid.lower += (u_int64_t)read_byte(io) << 8 * 3;
-  uuid.lower += (u_int64_t)read_byte(io) << 8 * 2;
-  uuid.lower += (u_int64_t)read_byte(io) << 8 * 1;
-  uuid.lower += (u_int64_t)read_byte(io);
-
-  return uuid;
-}
-
-void read_ipos_into(ReadableBuffer *io, ivec3 pos) {
-  uint64_t packed = read_ulong(io);
-  pos[0] = packed >> 38;
-  pos[1] = packed & 0xFFF;
-  pos[2] = packed & 0x3ffffff000 >> 12;
-}
-
-/*
-// Decompress the block array
-int compressed_blocks_len = ntohl(*(uint32_t *)(compressed_blocks));
-uint64_t *compressed = (uint64_t *)(compressed_blocks + 4);
-int bitsize = ceil_log2(palette_length);
-bitsize = bitsize > 4 ? bitsize : 4;
-dprintf("Bitsize %d compressed_len %d\n", bitsize, compressed_blocks_len);
-
-thread_local static uint16_t uncompressed[4096];
-
-int ind = 0;
-for (int i = 0; i < compressed_blocks_len; i++) {
-  uint64_t cur = ntohll(compressed[i]);
-  for (int j = 0; j < 64 / bitsize; j++) {
-    int block = cur & ((1 << bitsize) - 1);
-    cur = cur >> bitsize;
-    uncompressed[ind] = block;
-    ind++;
-    if (ind == 4096) {
-      goto after_loop;
-    }
-  }
-}
-after_loop:
-*/
-
-void read_compressed_long_arr(ReadableBuffer *p, int bits_per_entry, int entries, int compressed_len, int to[]) {
-  int ind = 0;
-  for (int i = 0; i < compressed_len; i++) {
-    uint64_t cur = read_ulong(p);
-    // printf("comlong i=%d, bpe=%d, total_entries=%d, curr_entry=%d\n", i, bits_per_entry, entries, ind);
-    for (int j = 0; j < 64 / bits_per_entry; j++) {
-      int block = cur & ((1 << bits_per_entry) - 1);
-      cur = cur >> bits_per_entry;
-      to[ind] = block;
-      ind++;
-      if (ind == entries) {
-        return;
-      }
-    }
-  }
-}
-
-size_t nbt_reader(void *_p, uint8_t *data, size_t size) {
-  ReadableBuffer *p = _p;
-
-  int to_read = min(size, p->buf.len - p->cursor);
-
-  printf("c: cursor=%d, buflen=%ld, to_read=%d, reqsize=%ld\n", p->cursor, p->buf.len, to_read, size);
-
-  for (int i = 0; i < to_read; i++) {
-    data[i] = read_byte(p);
-  }
-
-  return to_read;
-}
-
-mcapiString read_nbt_string(ReadableBuffer *p) {
-  mcapiString res = {
-    .len = read_ushort(p),
-  };
-
-  res.ptr = p->buf.ptr + p->cursor;
-
-  p->cursor += res.len;
-
-  return res;
-}
-
-void read_nbt_into(ReadableBuffer *p, mcapiNBT *nbt);
-
-void read_nbt_value(ReadableBuffer *p, mcapiNBT *nbt, mcapiNBTTagType type) {
-  nbt->type = type;
-
-  int size;  // used in some branches
-
-  switch (type) {
-    case MCAPI_NBT_BYTE:
-      nbt->byte_value = read_byte(p);
-      break;
-    case MCAPI_NBT_SHORT:
-      nbt->short_value = read_short(p);
-      break;
-    case MCAPI_NBT_INT:
-      nbt->int_value = read_int(p);
-      break;
-    case MCAPI_NBT_LONG:
-      nbt->long_value = read_long(p);
-      break;
-    case MCAPI_NBT_FLOAT:
-      nbt->float_value = read_float(p);
-      break;
-    case MCAPI_NBT_DOUBLE:
-      nbt->double_value = read_double(p);
-      break;
-    case MCAPI_NBT_BYTE_ARRAY:
-      size = read_int(p);
-      printf("byte_array_size %d\n", size);
-      nbt->byte_array_value = read_bytes(p, size);
-      break;
-    case MCAPI_NBT_STRING:
-      nbt->string_value = read_nbt_string(p);
-      break;
-    case MCAPI_NBT_LIST:
-      mcapiNBTTagType list_type = read_byte(p);
-      size = nbt->list_value.size = read_int(p);
-      nbt->list_value.items = calloc(nbt->list_value.size, sizeof(mcapiNBT));
-      for (int i = 0; i < size; i++) {
-        nbt->list_value.items[i].type = list_type;
-        read_nbt_value(p, nbt->list_value.items + i, list_type);
-      }
-      break;
-    case MCAPI_NBT_COMPOUND:
-      int curr_buflen = 4;
-      nbt->compound_value.children = calloc(curr_buflen, sizeof(mcapiNBT));
-      for (int i = 0;; i++) {
-        if (i >= curr_buflen) {
-          int old_buflen = curr_buflen;
-          curr_buflen *= 2;
-          mcapiNBT *old = nbt->compound_value.children;
-          nbt->compound_value.children = calloc(curr_buflen, sizeof(mcapiNBT));
-          memcpy(nbt->compound_value.children, old, old_buflen * sizeof(mcapiNBT));
-          free(old);
-        }
-        read_nbt_into(p, nbt->compound_value.children + i);
-        if (nbt->compound_value.children[i].type == MCAPI_NBT_END) {
-          nbt->compound_value.count = i + 1;
-          break;
-        }
-      }
-      break;
-    case MCAPI_NBT_INT_ARRAY:
-      size = nbt->int_array_value.size = read_int(p);
-      nbt->int_array_value.data = malloc(sizeof(int) * size);
-      for (int i = 0; i < size; i++) {
-        nbt->int_array_value.data[i] = read_int(p);
-      }
-      break;
-    case MCAPI_NBT_LONG_ARRAY:
-      size = nbt->long_array_value.size = read_int(p);
-      nbt->long_array_value.data = malloc(sizeof(int64_t) * size);
-      for (int i = 0; i < size; i++) {
-        nbt->long_array_value.data[i] = read_long(p);
-      }
-      break;
-  }
-}
-
-void read_nbt_into(ReadableBuffer *p, mcapiNBT *nbt) {
-  mcapiNBTTagType type = read_byte(p);
-  nbt->type = type;
-
-  if (type == MCAPI_NBT_END) {
-    return;
-  }
-
-  // All other tags are named
-  nbt->name = read_nbt_string(p);
-  read_nbt_value(p, nbt, type);
-}
-
-mcapiNBT *read_nbt(ReadableBuffer *p) {
-  mcapiNBT *nbt = calloc(1, sizeof(mcapiNBT));
-
-  int type = read_byte(p);
-
-  read_nbt_value(p, nbt, type);
-
-  return nbt;
-}
-
-mcapiNBT *mcapi_nbt_get_compound_tag(mcapiNBT *nbt, char *name) {
-  if (nbt->type != MCAPI_NBT_COMPOUND) {
-    return NULL;
-  }
-  for (int i = 0; i < nbt->compound_value.count; i++) {
-    // mcapi_print_str(nbt->compound_value.children[i].name);
-    // printf("\n");
-    if (nbt->compound_value.children[i].name.len == 0) {
-      continue;
-    }
-    if (strncmp(nbt->compound_value.children[i].name.ptr, name, nbt->compound_value.children[i].name.len) == 0) {
-      return nbt->compound_value.children + i;
-    }
-  }
-  return NULL;
-}
-void _destroy_nbt_recur(mcapiNBT* nbt);
-
-void mcapi_destroy_nbt(mcapiNBT* nbt) {
-  _destroy_nbt_recur(nbt);
-  free(nbt);
-}
-
-void _destroy_nbt_recur(mcapiNBT* nbt) {
-  if (nbt->type == MCAPI_NBT_COMPOUND) {
-    for (int i = 0; i < nbt->compound_value.count; i++) {
-      _destroy_nbt_recur(&nbt->compound_value.children[i]);
-    }
-    free(nbt->compound_value.children);
-  } else if (nbt->type == MCAPI_NBT_LIST) {
-    for (int i = 0; i < nbt->list_value.size; i++) {
-      _destroy_nbt_recur(&nbt->list_value.items[i]);
-    }
-    free(nbt->list_value.items);
-  } else if (nbt->type == MCAPI_NBT_BYTE_ARRAY) {
-    mcapi_destroy_buffer(nbt->byte_array_value);
-  } else if (nbt->type == MCAPI_NBT_INT_ARRAY) {
-    free(nbt->int_array_value.data);
-  } else if (nbt->type == MCAPI_NBT_LONG_ARRAY) {
-    free(nbt->long_array_value.data);
-  }
-}
-
 /* --- Sending Packet Code --- */
 
-void send_packet(mcapiConnection *conn, const mcapiBuffer packet) {
+void send_packet(mcapiConnection *conn, const Buffer packet) {
   WritableBuffer header_buffer = create_writable_buffer();
 
-  // printf("Sending packet %x (compthresh %d, len %ld)\n", packet.ptr[0], conn->compression_threshold, packet.len);
-
-  mcapiBuffer const *rest_of_packet = NULL;
-  mcapiBuffer compressed_buf = {};
-  mcapiBuffer encrypted = {};
+  Buffer const *rest_of_packet = NULL;
+  Buffer compressed_buf = {};
+  Buffer encrypted = {};
 
   if (conn->compression_threshold > 0) {
     if (packet.len < conn->compression_threshold) {
@@ -1125,7 +413,7 @@ void send_packet(mcapiConnection *conn, const mcapiBuffer packet) {
       rest_of_packet = &packet;
     } else {
       int max_size = libdeflate_zlib_compress_bound(conn->compressor, packet.len);
-      compressed_buf = mcapi_create_buffer(max_size);
+      compressed_buf = create_buffer(max_size);
       compressed_buf.len = libdeflate_zlib_compress(conn->compressor, packet.ptr, packet.len, compressed_buf.ptr, compressed_buf.len);
 
       write_varint(&header_buffer, packet.len);
@@ -1141,14 +429,11 @@ void send_packet(mcapiConnection *conn, const mcapiBuffer packet) {
     rest_of_packet = &packet;
   }
 
-  mcapiBuffer new_packet = mcapi_create_buffer(header_buffer.buf.len + rest_of_packet->len);
+  Buffer new_packet = create_buffer(header_buffer.buf.len + rest_of_packet->len);
   memcpy(new_packet.ptr, header_buffer.buf.buffer.ptr, header_buffer.buf.len);
   memcpy(new_packet.ptr + header_buffer.buf.len, rest_of_packet->ptr, rest_of_packet->len);
 
   if (conn->encryption_enabled) {
-    // int encrypted_len = 0;
-    // EVP_CipherUpdate(conn->encrypt_ctx, NULL, &encrypted_len, rest_of_packet->ptr, rest_of_packet->len);
-    // mcapiBuffer encrypted = mcapi_create_buffer(new_packet);
     int encrypted_len = 0;
     EVP_CipherUpdate(conn->encrypt_ctx, new_packet.ptr, &encrypted_len, new_packet.ptr, new_packet.len);
     new_packet.len = encrypted_len;
@@ -1156,10 +441,10 @@ void send_packet(mcapiConnection *conn, const mcapiBuffer packet) {
 
   write(conn->sockfd, new_packet.ptr, new_packet.len);
 
-  mcapi_destroy_buffer(new_packet);
+  destroy_buffer(new_packet);
   destroy_writable_buffer(header_buffer);
-  if (compressed_buf.len != 0) mcapi_destroy_buffer(compressed_buf);
-  if (encrypted.len != 0) mcapi_destroy_buffer(encrypted);
+  if (compressed_buf.len != 0) destroy_buffer(compressed_buf);
+  if (encrypted.len != 0) destroy_buffer(encrypted);
 }
 
 #define INTERNAL_BUF_SIZE 1024 * 1024
@@ -1198,8 +483,8 @@ void mcapi_send_login_start(mcapiConnection *conn, mcapiLoginStartPacket p) {
 }
 
 typedef struct EncryptionResponsePacket {
-  mcapiBuffer enc_shared_secret;
-  mcapiBuffer enc_verify_token;
+  Buffer enc_shared_secret;
+  Buffer enc_verify_token;
 } EncryptionResponsePacket;
 
 void send_encryption_response_packet(mcapiConnection *conn, EncryptionResponsePacket p) {
@@ -1297,9 +582,9 @@ SetCompressionPacket read_set_compression_packet(ReadableBuffer *p) {
 }
 
 typedef struct EncryptionRequestPacket {
-  mcapiString serverId;
-  mcapiBuffer publicKey;
-  mcapiBuffer verifyToken;
+  String serverId;
+  Buffer publicKey;
+  Buffer verifyToken;
   bool shouldAuthenticate;
 } EncryptionRequestPacket;
 
@@ -1376,8 +661,8 @@ mcapiRegistryDataPacket create_registry_data_packet(ReadableBuffer *p) {
   mcapiRegistryDataPacket res = {0};
   res.id = read_string(p);
   res.entry_count = read_varint(p);
-  res.entry_names = malloc(sizeof(mcapiString) * res.entry_count);
-  res.entries = malloc(sizeof(mcapiNBT *) * res.entry_count);
+  res.entry_names = malloc(sizeof(String) * res.entry_count);
+  res.entries = malloc(sizeof(NBT *) * res.entry_count);
   for (int i = 0; i < res.entry_count; i++) {
     res.entry_names[i] = read_string(p);
     bool present = read_byte(p);
@@ -1390,7 +675,7 @@ mcapiRegistryDataPacket create_registry_data_packet(ReadableBuffer *p) {
 
 void destroy_registry_data_packet(mcapiRegistryDataPacket p) {
   for (int i = 0; i < p.entry_count; i++) {
-    mcapi_destroy_nbt(p.entries[i]);
+    destroy_nbt(p.entries[i]);
   }
   free(p.entry_names);
   free(p.entries);
@@ -1487,10 +772,10 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
 
   // Sky and block lights
 
-  mcapiBitSet sky_light_mask = read_bitset(p);
-  mcapiBitSet block_light_mask = read_bitset(p);
-  mcapiBitSet empty_sky_light_mask = read_bitset(p);
-  mcapiBitSet empty_block_light_mask = read_bitset(p);
+  BitSet sky_light_mask = read_bitset(p);
+  BitSet block_light_mask = read_bitset(p);
+  BitSet empty_sky_light_mask = read_bitset(p);
+  BitSet empty_block_light_mask = read_bitset(p);
 
   int sky_light_array_count = read_varint(p);
   int sky_data_count = 0;
@@ -1499,7 +784,7 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
       sky_data_count += 1;
       int length = read_varint(p);
       assert(length == 2048);
-      mcapiBuffer buffer = read_bytes(p, length);
+      Buffer buffer = read_bytes(p, length);
       // Expand from half-bytes to full-bytes for convenience to the client
       for (int ind = 0; ind < 4096; ind += 1) {
         res.sky_light_array[i][ind] = buffer.ptr[ind / 2] >> (4 * (ind % 2)) & 0x0F;
@@ -1519,7 +804,7 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
       block_data_count += 1;
       int length = read_varint(p);
       assert(length == 2048);
-      mcapiBuffer buffer = read_bytes(p, length);
+      Buffer buffer = read_bytes(p, length);
       // Expand from half-bytes to full-bytes for convenience to the client
       for (int ind = 0; ind < 4096; ind += 1) {
         res.block_light_array[i][ind] = buffer.ptr[ind / 2] >> (4 * (ind % 2)) & 0x0F;
@@ -1541,10 +826,10 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
 }
 
 void destroy_chunk_and_light_data_packet(mcapiChunkAndLightDataPacket p) {
-  mcapi_destroy_nbt(p.heightmaps);
+  destroy_nbt(p.heightmaps);
   free(p.chunk_sections);
   for (int i = 0; i < p.block_entity_count; i++) {
-    mcapi_destroy_nbt(p.block_entities[i].data);
+    destroy_nbt(p.block_entities[i].data);
   }
   free(p.block_entities);
 }
@@ -1587,12 +872,146 @@ mcapi_setcb_func(chunk_and_light_data, mcapiChunkAndLightDataPacket);
 mcapi_setcb_func(synchronize_player_position, mcapiSynchronizePlayerPositionPacket);
 mcapi_setcb_func(update_time, mcapiUpdateTimePacket);
 
+void enable_encryption(mcapiConnection *conn, EncryptionRequestPacket encrypt_req) {
+  Buffer shared_secret = create_buffer(16);
+  RAND_bytes(shared_secret.ptr, shared_secret.len);
+
+  if (encrypt_req.shouldAuthenticate) {
+    // Get hash
+    EVP_MD_CTX *mdCtx = EVP_MD_CTX_new();
+    Buffer hash = create_buffer(20);
+    if (1 != EVP_DigestInit_ex(mdCtx, EVP_sha1(), NULL)) ERR_print_errors_fp(stderr);
+    if (1 != EVP_DigestUpdate(mdCtx, encrypt_req.serverId.ptr, encrypt_req.serverId.len)) ERR_print_errors_fp(stderr);
+    if (1 != EVP_DigestUpdate(mdCtx, shared_secret.ptr, shared_secret.len)) ERR_print_errors_fp(stderr);
+    if (1 != EVP_DigestUpdate(mdCtx, encrypt_req.publicKey.ptr, encrypt_req.publicKey.len)) ERR_print_errors_fp(stderr);
+    if (1 != EVP_DigestFinal_ex(mdCtx, hash.ptr, NULL)) ERR_print_errors_fp(stderr);
+    EVP_MD_CTX_free(mdCtx);
+
+    // Convert hash to string
+
+    char *hex_chars = "0123456789abcdef";
+
+    WritableBuffer hash_as_string = create_writable_buffer();
+
+    bool is_neg = hash.ptr[0] & 0b10000000;
+    if (is_neg) {
+      write_byte(&hash_as_string, '-');
+      write_byte(&hash_as_string, hex_chars[((~hash.ptr[0]) & 0b11110000) >> 4]);
+      write_byte(&hash_as_string, hex_chars[((~hash.ptr[0]) & 0b00001111)]);
+    }
+    for (int i = is_neg ? 1 : 0; i < 20; i++) {
+      int v = is_neg ? (~hash.ptr[i]) : hash.ptr[i];
+      if (is_neg && i == 19) {
+        v++;
+      }
+      write_byte(&hash_as_string, hex_chars[(v & 0b11110000) >> 4]);
+      write_byte(&hash_as_string, hex_chars[v & 0b00001111]);
+    }
+
+    destroy_buffer(hash);
+
+    // Authenticate with servers
+
+    WritableBuffer json = create_writable_buffer();
+    write_buffer(&json, to_string("{\"accessToken\":\""));
+    write_buffer(&json, conn->access_token);
+    write_buffer(&json, to_string("\", \"selectedProfile\":\""));
+    write_buffer(&json, conn->uuid);
+    write_buffer(&json, to_string("\", \"serverId\":\""));
+    write_buffer(&json, resizable_buffer_to_buffer(hash_as_string.buf));
+    write_buffer(&json, to_string("\"}"));
+    write_byte(&json, '\0');  // Allows it to be used like a c str
+
+    destroy_writable_buffer(hash_as_string);
+
+    printf("JSON\n%s\n", json.buf.buffer.ptr);
+
+    CURL *curl;
+    curl_global_init(CURL_GLOBAL_ALL);
+    curl = curl_easy_init();
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Accept: application/json");
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    curl_easy_setopt(curl, CURLOPT_URL, "https://sessionserver.mojang.com/session/minecraft/join");
+
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json.buf.buffer.ptr);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    curl_slist_free_all(headers);
+    destroy_writable_buffer(json);
+  }
+
+  // Encryption stuff
+
+  // Decode the key
+  EVP_PKEY *pkey = NULL;
+  OSSL_DECODER_CTX *decoder_ctx = OSSL_DECODER_CTX_new_for_pkey(&pkey, "DER", NULL, "RSA", EVP_PKEY_PUBLIC_KEY, NULL, NULL);
+  printf("Got here\n");
+  fflush(stdout);
+  if (decoder_ctx == NULL) {
+    printf("Error\n");
+    ERR_print_errors_fp(stderr);
+  }
+  Buffer pubkey = encrypt_req.publicKey;
+  printf("pubkey %p\n", encrypt_req.publicKey.ptr);
+  if (1 != OSSL_DECODER_from_data(decoder_ctx, (const unsigned char **)&pubkey.ptr, &pubkey.len)) ERR_print_errors_fp(stderr);
+
+  // Encrypt secret (https://www.openssl.org/docs/man3.0/man3/EVP_PKEY_encrypt.html)
+  EVP_PKEY_CTX *pkey_ctx = EVP_PKEY_CTX_new(pkey, NULL);
+  if (1 != EVP_PKEY_encrypt_init(pkey_ctx)) ERR_print_errors_fp(stderr);
+  if (1 != EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_PKCS1_PADDING)) ERR_print_errors_fp(stderr);
+
+  size_t ss_encrypted_len = 0;
+
+  // Get length
+  if (1 != EVP_PKEY_encrypt(pkey_ctx, NULL, &ss_encrypted_len, shared_secret.ptr, shared_secret.len)) ERR_print_errors_fp(stderr);
+
+  // Encrypt
+  Buffer ss_encrypted = create_buffer(ss_encrypted_len);
+  if (1 != EVP_PKEY_encrypt(pkey_ctx, ss_encrypted.ptr, &ss_encrypted.len, shared_secret.ptr, shared_secret.len)) ERR_print_errors_fp(stderr);
+
+  // Encrypt token
+
+  size_t vt_encrypted_len = 0;
+
+  // Get length
+  if (1 != EVP_PKEY_encrypt(pkey_ctx, NULL, &vt_encrypted_len, encrypt_req.verifyToken.ptr, encrypt_req.verifyToken.len)) ERR_print_errors_fp(stderr);
+
+  // Encrypt
+  Buffer vt_encrypted = create_buffer(vt_encrypted_len);
+  if (1 != EVP_PKEY_encrypt(pkey_ctx, vt_encrypted.ptr, &vt_encrypted.len, encrypt_req.verifyToken.ptr, encrypt_req.verifyToken.len)) ERR_print_errors_fp(stderr);
+
+  send_encryption_response_packet(conn, (EncryptionResponsePacket){
+                                          .enc_shared_secret = ss_encrypted,
+                                          .enc_verify_token = vt_encrypted,
+                                        });
+
+  destroy_buffer(ss_encrypted);
+  destroy_buffer(vt_encrypted);
+  EVP_PKEY_free(pkey);
+  EVP_PKEY_CTX_free(pkey_ctx);
+  OSSL_DECODER_CTX_free(decoder_ctx);
+
+  conn->shared_secret = shared_secret;
+
+  // Set up sym encryption/decryption
+  conn->encrypt_ctx = EVP_CIPHER_CTX_new();
+  conn->decrypt_ctx = EVP_CIPHER_CTX_new();
+  if (1 != EVP_CipherInit_ex2(conn->encrypt_ctx, EVP_aes_128_cfb8(), shared_secret.ptr, shared_secret.ptr, 1, NULL)) ERR_print_errors_fp(stderr);
+  if (1 != EVP_CipherInit_ex2(conn->decrypt_ctx, EVP_aes_128_cfb8(), shared_secret.ptr, shared_secret.ptr, 0, NULL)) ERR_print_errors_fp(stderr);
+
+  conn->encryption_enabled = true;
+}
+
 #define READABLE_BUF_SIZE 1024 * 8
 
 uint8_t _internal_readable_buffer[READABLE_BUF_SIZE];
 ReadableBuffer readable = {
   .cursor = 0,
-  .buf = (mcapiBuffer){
+  .buf = (Buffer){
     .len = 0,
     .ptr = _internal_readable_buffer,
   }
@@ -1600,7 +1019,7 @@ ReadableBuffer readable = {
 
 void mcapi_poll(mcapiConnection *conn) {
   static ReadableBuffer curr_packet = {};
-  static mcapiBuffer to_process = {};
+  static Buffer to_process = {};
 
   int nbytes_read;
 
@@ -1622,7 +1041,7 @@ void mcapi_poll(mcapiConnection *conn) {
         for (int i = 0; i < nbytes_read; i++) {
           if (has_varint(readable)) {
             int len = read_varint(&readable);
-            curr_packet = to_readable_buffer(mcapi_create_buffer(len));
+            curr_packet = to_readable_buffer(create_buffer(len));
             break;
           }
         }
@@ -1642,10 +1061,10 @@ void mcapi_poll(mcapiConnection *conn) {
             curr_packet.cursor = 1;  // Skip data length byte
           } else {
             int decompressed_length = read_varint(&curr_packet);
-            mcapiBuffer decompressed = mcapi_create_buffer(decompressed_length);
+            Buffer decompressed = create_buffer(decompressed_length);
 
             libdeflate_zlib_decompress(conn->decompressor, curr_packet.buf.ptr + curr_packet.cursor, curr_packet.buf.len - curr_packet.cursor, decompressed.ptr, decompressed.len, &decompressed.len);
-            mcapi_destroy_buffer(curr_packet.buf);
+            destroy_buffer(curr_packet.buf);
             curr_packet.buf = decompressed;
             curr_packet.cursor = 0;
             // perror("No support for compressed packets yet!\n");
@@ -1667,137 +1086,8 @@ void mcapi_poll(mcapiConnection *conn) {
             case ENCRYPTION_REQUEST:
               printf("Enabling encryption\n");
               EncryptionRequestPacket encrypt_req = read_encryption_request_packet(&curr_packet);
-              mcapiBuffer shared_secret = mcapi_create_buffer(16);
-              RAND_bytes(shared_secret.ptr, shared_secret.len);
+              enable_encryption(conn, encrypt_req);
 
-              if (encrypt_req.shouldAuthenticate) {
-                // Get hash
-                EVP_MD_CTX *mdCtx = EVP_MD_CTX_new();
-                mcapiBuffer hash = mcapi_create_buffer(20);
-                if (1 != EVP_DigestInit_ex(mdCtx, EVP_sha1(), NULL)) ERR_print_errors_fp(stderr);
-                if (1 != EVP_DigestUpdate(mdCtx, encrypt_req.serverId.ptr, encrypt_req.serverId.len)) ERR_print_errors_fp(stderr);
-                if (1 != EVP_DigestUpdate(mdCtx, shared_secret.ptr, shared_secret.len)) ERR_print_errors_fp(stderr);
-                if (1 != EVP_DigestUpdate(mdCtx, encrypt_req.publicKey.ptr, encrypt_req.publicKey.len)) ERR_print_errors_fp(stderr);
-                if (1 != EVP_DigestFinal_ex(mdCtx, hash.ptr, NULL)) ERR_print_errors_fp(stderr);
-                EVP_MD_CTX_free(mdCtx);
-
-                // Convert hash to string
-
-                char *hex_chars = "0123456789abcdef";
-
-                WritableBuffer hash_as_string = create_writable_buffer();
-
-                bool is_neg = hash.ptr[0] & 0b10000000;
-                if (is_neg) {
-                  write_byte(&hash_as_string, '-');
-                  write_byte(&hash_as_string, hex_chars[((~hash.ptr[0]) & 0b11110000) >> 4]);
-                  write_byte(&hash_as_string, hex_chars[((~hash.ptr[0]) & 0b00001111)]);
-                }
-                for (int i = is_neg ? 1 : 0; i < 20; i++) {
-                  int v = is_neg ? (~hash.ptr[i]) : hash.ptr[i];
-                  if (is_neg && i == 19) {
-                    v++;
-                  }
-                  write_byte(&hash_as_string, hex_chars[(v & 0b11110000) >> 4]);
-                  write_byte(&hash_as_string, hex_chars[v & 0b00001111]);
-                }
-
-                mcapi_destroy_buffer(hash);
-
-                // Authenticate with servers
-
-                WritableBuffer json = create_writable_buffer();
-                write_buffer(&json, mcapi_to_string("{\"accessToken\":\""));
-                write_buffer(&json, conn->access_token);
-                write_buffer(&json, mcapi_to_string("\", \"selectedProfile\":\""));
-                write_buffer(&json, conn->uuid);
-                write_buffer(&json, mcapi_to_string("\", \"serverId\":\""));
-                write_buffer(&json, resizable_buffer_to_buffer(hash_as_string.buf));
-                write_buffer(&json, mcapi_to_string("\"}"));
-                write_byte(&json, '\0');  // Allows it to be used like a c str
-
-                destroy_writable_buffer(hash_as_string);
-
-                printf("JSON\n%s\n", json.buf.buffer.ptr);
-
-                CURL *curl;
-                curl_global_init(CURL_GLOBAL_ALL);
-                curl = curl_easy_init();
-                struct curl_slist *headers = NULL;
-                headers = curl_slist_append(headers, "Accept: application/json");
-                headers = curl_slist_append(headers, "Content-Type: application/json");
-
-                curl_easy_setopt(curl, CURLOPT_URL, "https://sessionserver.mojang.com/session/minecraft/join");
-
-                curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
-                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json.buf.buffer.ptr);
-                curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-                curl_easy_perform(curl);
-                curl_easy_cleanup(curl);
-                curl_slist_free_all(headers);
-                destroy_writable_buffer(json);
-              }
-
-              // Encryption stuff
-
-              // Decode the key
-              EVP_PKEY *pkey = NULL;
-              OSSL_DECODER_CTX *decoder_ctx = OSSL_DECODER_CTX_new_for_pkey(&pkey, "DER", NULL, "RSA", EVP_PKEY_PUBLIC_KEY, NULL, NULL);
-              printf("Got here\n");
-              fflush(stdout);
-              if (decoder_ctx == NULL) {
-                printf("Error\n");
-                ERR_print_errors_fp(stderr);
-              }
-              mcapiBuffer pubkey = encrypt_req.publicKey;
-              printf("pubkey %p\n", encrypt_req.publicKey.ptr);
-              if (1 != OSSL_DECODER_from_data(decoder_ctx, (const unsigned char **)&pubkey.ptr, &pubkey.len)) ERR_print_errors_fp(stderr);
-
-              // Encrypt secret (https://www.openssl.org/docs/man3.0/man3/EVP_PKEY_encrypt.html)
-              EVP_PKEY_CTX *pkey_ctx = EVP_PKEY_CTX_new(pkey, NULL);
-              if (1 != EVP_PKEY_encrypt_init(pkey_ctx)) ERR_print_errors_fp(stderr);
-              if (1 != EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_PKCS1_PADDING)) ERR_print_errors_fp(stderr);
-
-              size_t ss_encrypted_len = 0;
-
-              // Get length
-              if (1 != EVP_PKEY_encrypt(pkey_ctx, NULL, &ss_encrypted_len, shared_secret.ptr, shared_secret.len)) ERR_print_errors_fp(stderr);
-
-              // Encrypt
-              mcapiBuffer ss_encrypted = mcapi_create_buffer(ss_encrypted_len);
-              if (1 != EVP_PKEY_encrypt(pkey_ctx, ss_encrypted.ptr, &ss_encrypted.len, shared_secret.ptr, shared_secret.len)) ERR_print_errors_fp(stderr);
-
-              // Encrypt token
-
-              size_t vt_encrypted_len = 0;
-
-              // Get length
-              if (1 != EVP_PKEY_encrypt(pkey_ctx, NULL, &vt_encrypted_len, encrypt_req.verifyToken.ptr, encrypt_req.verifyToken.len)) ERR_print_errors_fp(stderr);
-
-              // Encrypt
-              mcapiBuffer vt_encrypted = mcapi_create_buffer(vt_encrypted_len);
-              if (1 != EVP_PKEY_encrypt(pkey_ctx, vt_encrypted.ptr, &vt_encrypted.len, encrypt_req.verifyToken.ptr, encrypt_req.verifyToken.len)) ERR_print_errors_fp(stderr);
-
-              send_encryption_response_packet(conn, (EncryptionResponsePacket){
-                                                      .enc_shared_secret = ss_encrypted,
-                                                      .enc_verify_token = vt_encrypted,
-                                                    });
-
-              mcapi_destroy_buffer(ss_encrypted);
-              mcapi_destroy_buffer(vt_encrypted);
-              EVP_PKEY_free(pkey);
-              EVP_PKEY_CTX_free(pkey_ctx);
-              OSSL_DECODER_CTX_free(decoder_ctx);
-
-              conn->shared_secret = shared_secret;
-
-              // Set up sym encryption/decryption
-              conn->encrypt_ctx = EVP_CIPHER_CTX_new();
-              conn->decrypt_ctx = EVP_CIPHER_CTX_new();
-              if (1 != EVP_CipherInit_ex2(conn->encrypt_ctx, EVP_aes_128_cfb8(), shared_secret.ptr, shared_secret.ptr, 1, NULL)) ERR_print_errors_fp(stderr);
-              if (1 != EVP_CipherInit_ex2(conn->decrypt_ctx, EVP_aes_128_cfb8(), shared_secret.ptr, shared_secret.ptr, 0, NULL)) ERR_print_errors_fp(stderr);
-
-              conn->encryption_enabled = true;
               break;
             case LOGIN_SUCCESS:
               mcapiLoginSuccessPacket packet = create_login_success_packet(&curr_packet);
@@ -1808,19 +1098,6 @@ void mcapi_poll(mcapiConnection *conn) {
               printf("Unknown login packet %02x (len %ld)\n", type, curr_packet.buf.len);
               break;
           }
-          /*
-          Unknown Play Packet 2b
-          Unknown Play Packet b
-          Unknown Play Packet 38
-          Unknown Play Packet 53
-          Unknown Play Packet 6d
-          Unknown Play Packet 1f
-          Unknown Play Packet 41
-          Unknown Play Packet 40
-          Unknown Play Packet 4b
-          Unknown Play Packet 6c
-          */
-
         } else if (conn->state == MCAPI_STATE_CONFIG) {
           switch (type) {
             case FINISH_CONFIG:
@@ -1865,7 +1142,7 @@ void mcapi_poll(mcapiConnection *conn) {
           }
         }
 
-        mcapi_destroy_buffer(curr_packet.buf);
+        destroy_buffer(curr_packet.buf);
         curr_packet = (ReadableBuffer){0};
       }
     }
