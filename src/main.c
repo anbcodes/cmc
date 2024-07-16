@@ -50,6 +50,12 @@ typedef struct SkyUniforms {
   float time_of_day;
 } SkyUniforms;
 
+typedef struct BlockSelectedUniforms {
+  mat4 view;
+  mat4 projection;
+  vec3 position;
+} BlockSelectedUniforms;
+
 typedef struct SkyRenderer {
   WGPUShaderModule shader_module;
   WGPUBindGroup bind_group;
@@ -59,6 +65,16 @@ typedef struct SkyRenderer {
   SkyUniforms uniforms;
   WGPUBuffer vertex_buffer;
 } SkyRenderer;
+
+typedef struct BlockSelectedRenderer {
+  WGPUShaderModule shader_module;
+  WGPUBindGroup bind_group;
+  WGPURenderPipeline render_pipeline;
+  WGPUPipelineLayout pipeline_layout;
+  BlockSelectedUniforms uniforms;
+  WGPUBuffer uniform_buffer;
+  WGPUBuffer vertex_buffer;
+} BlockSelectedRenderer;
 
 typedef struct Game {
   WGPUInstance instance;
@@ -78,6 +94,7 @@ typedef struct Game {
   WGPUPipelineLayout pipeline_layout;
   WGPUShaderModule shader_module;
   SkyRenderer sky_renderer;
+  BlockSelectedRenderer block_selected_renderer;
   GLFWwindow *window;
   float eye_height;
   vec3 size;
@@ -1263,6 +1280,230 @@ void sky_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
   wgpuRenderPassEncoderDraw(render_pass_encoder, 6, 1, 0, 0);
 }
 
+void block_selected_renderer_init() {
+  game.block_selected_renderer.shader_module =
+    frmwrk_load_shader_module(game.device, "block_outline.wgsl");
+  assert(game.block_selected_renderer.shader_module);
+
+  // game.sky_renderer.uniform_buffer = frmwrk_device_create_buffer_init(
+  //   game.device,
+  //   &(const frmwrk_buffer_init_descriptor){
+  //     .label = "Uniform Buffer",
+  //     .content = (void *)&game.sky_renderer.uniforms,
+  //     .content_size = sizeof(game.sky_renderer.uniforms),
+  //     .usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst,
+  //   }
+  // );
+
+  game.block_selected_renderer.uniform_buffer = frmwrk_device_create_buffer_init(
+    game.device,
+    &(const frmwrk_buffer_init_descriptor){
+      .label = "Selected Uniform Buffer",
+      .content = (void *)&game.block_selected_renderer.uniforms,
+      .content_size = sizeof(game.block_selected_renderer.uniforms),
+      .usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst,
+    }
+  );
+  printf("selected uniform buffer %p\n", game.block_selected_renderer.uniform_buffer);
+
+  float vertices[18*4*6];
+
+  int i = 0;
+  float s = 0.01;
+
+  for (int d = 0; d <= 2; d++) {
+    for (int p = 0; p <= 1; p++) {
+      for (int p1 = 0; p1 <= 1; p1++) {
+        for (int p2 = 0; p2 <= 1; p2++) {
+          int d1 = p1 == 1 ? (d + 1) % 3 : (d + 2) % 3;
+          int d2 = p1 == 0 ? (d + 1) % 3 : (d + 2) % 3;
+          vertices[i + d] = p;
+          vertices[i + d1] = p1;
+          vertices[i + d2] = p2;
+          i += 3;
+          vertices[i + d] = p;
+          vertices[i + d1] = p1;
+          vertices[i + d2] = p2 == 1 ? p2 - s : s;
+          i += 3;
+          vertices[i + d] = p;
+          vertices[i + d1] = 1-p1;
+          vertices[i + d2] = p2 == 1 ? p2 - s : s;
+          i += 3;
+          vertices[i + d] = p;
+          vertices[i + d1] = p1;
+          vertices[i + d2] = p2;
+          i += 3;
+          vertices[i + d] = p;
+          vertices[i + d1] = 1-p1;
+          vertices[i + d2] = p2 == 1 ? p2 - s : s;
+          i += 3;
+          vertices[i + d] = p;
+          vertices[i + d1] = 1-p1;
+          vertices[i + d2] = p2;
+          i += 3;
+        }
+      }
+    }
+  }
+
+  game.block_selected_renderer.vertex_buffer = frmwrk_device_create_buffer_init(
+    game.device,
+    &(const frmwrk_buffer_init_descriptor){
+      .label = "Selected Vertex Buffer",
+      .content = (void *)vertices,
+      .content_size = sizeof(vertices),
+      .usage = WGPUBufferUsage_Vertex,
+    }
+  );
+
+  WGPUBindGroupLayoutEntry bgl_entries[] = {
+    [0] = {
+      .binding = 0,
+      .visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment,
+      .buffer = {
+        .type = WGPUBufferBindingType_Uniform,
+      },
+    },
+  };
+
+  WGPUBindGroupLayoutDescriptor bgl_desc = {
+    .entryCount = sizeof(bgl_entries) / sizeof(bgl_entries[0]),
+    .entries = bgl_entries,
+  };
+
+  WGPUBindGroupLayout bgl = wgpuDeviceCreateBindGroupLayout(game.device, &bgl_desc);
+
+  WGPUBindGroupEntry bg_entries[] = {
+    [0] = {
+      .binding = 0,
+      .buffer = game.block_selected_renderer.uniform_buffer,
+      .size = sizeof(game.block_selected_renderer.uniforms),
+    },
+  };
+  WGPUBindGroupDescriptor bg_desc = {
+    .layout = bgl,
+    .entryCount = sizeof(bg_entries) / sizeof(bg_entries[0]),
+    .entries = bg_entries,
+  };
+  game.block_selected_renderer.bind_group = wgpuDeviceCreateBindGroup(game.device, &bg_desc);
+
+  static const WGPUVertexAttribute vertex_attributes[] = {
+    [0] = {
+      .format = WGPUVertexFormat_Float32x3,
+      .offset = 0,
+      .shaderLocation = 0,
+    },
+  };
+
+  game.block_selected_renderer.pipeline_layout = wgpuDeviceCreatePipelineLayout(
+    game.device,
+    &(const WGPUPipelineLayoutDescriptor){
+      .label = "block_selected_renderer.pipeline_layout",
+      .bindGroupLayoutCount = 1,
+      .bindGroupLayouts = (const WGPUBindGroupLayout[]){
+        bgl,
+      },
+    }
+  );
+  assert(game.block_selected_renderer.pipeline_layout);
+
+  game.block_selected_renderer.render_pipeline = wgpuDeviceCreateRenderPipeline(
+    game.device,
+    &(const WGPURenderPipelineDescriptor){
+      .label = "Block Selected Render Pipeline",
+      .layout = game.block_selected_renderer.pipeline_layout,
+      .vertex = (const WGPUVertexState){
+        .module = game.block_selected_renderer.shader_module,
+        .entryPoint = "vs_main",
+        .bufferCount = 1,
+        .buffers = (const WGPUVertexBufferLayout[]){
+          (const WGPUVertexBufferLayout){
+            .arrayStride = 3 * sizeof(float),
+            .stepMode = WGPUVertexStepMode_Vertex,
+            .attributeCount = sizeof(vertex_attributes) /
+                              sizeof(vertex_attributes[0]),
+            .attributes = vertex_attributes,
+          },
+        },
+      },
+      .fragment = &(const WGPUFragmentState){
+        .module = game.block_selected_renderer.shader_module,
+        .entryPoint = "fs_main",
+        .targetCount = 1,
+        .targets = (const WGPUColorTargetState[]){
+          (const WGPUColorTargetState){
+            .format = game.surface_capabilities.formats[0],
+            .writeMask = WGPUColorWriteMask_All,
+          },
+        },
+      },
+      .primitive = (const WGPUPrimitiveState){
+        .topology = WGPUPrimitiveTopology_TriangleList,
+      },
+      .multisample = (const WGPUMultisampleState){
+        .count = 1,
+        .mask = 0xFFFFFFFF,
+      },
+      .depthStencil = &(WGPUDepthStencilState){
+        .depthWriteEnabled = true,
+        .depthCompare = WGPUCompareFunction_LessEqual,
+        .format = WGPUTextureFormat_Depth24Plus,
+        .stencilBack = (WGPUStencilFaceState){
+          .compare = WGPUCompareFunction_Always,
+          .failOp = WGPUStencilOperation_Replace,
+          .depthFailOp = WGPUStencilOperation_Replace,
+          .passOp = WGPUStencilOperation_Replace,
+        },
+        .stencilFront = (WGPUStencilFaceState){
+          .compare = WGPUCompareFunction_Always,
+          .failOp = WGPUStencilOperation_Replace,
+          .depthFailOp = WGPUStencilOperation_Replace,
+          .passOp = WGPUStencilOperation_Replace,
+        },
+      },
+    }
+  );
+  assert(game.block_selected_renderer.render_pipeline);
+}
+
+void block_selected_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
+  // Interpolate between last and current position for smooth movement
+  vec3 position;
+  glm_vec3_lerp(game.last_position, game.position, (game.current_time - game.last_tick_time) * TICKS_PER_SECOND, position);
+  vec3 eye = {position[0], position[1] + game.eye_height, position[2]};
+
+  vec3 center;
+  glm_vec3_add(eye, game.look, center);
+
+  mat4 view;
+  glm_lookat(eye, center, game.up, view);
+  memcpy(&game.block_selected_renderer.uniforms.view, view, sizeof(view));
+
+  mat4 projection;
+  glm_perspective(
+    GLM_PI_2, (float)game.config.width / (float)game.config.height, 0.01f, 100.0f, projection
+  );
+  memcpy(&game.block_selected_renderer.uniforms.projection, projection, sizeof(projection));
+
+  float reach = 5.0f;
+  vec3 normal;
+  int material;
+  world_target_block(&game.world, eye, game.look, reach, game.block_selected_renderer.uniforms.position, normal, &material);
+  if (material == 0) {
+    return;
+  }
+  game.block_selected_renderer.uniforms.position[0] = floor(game.block_selected_renderer.uniforms.position[0]);
+  game.block_selected_renderer.uniforms.position[1] = floor(game.block_selected_renderer.uniforms.position[1]);
+  game.block_selected_renderer.uniforms.position[2] = floor(game.block_selected_renderer.uniforms.position[2]);
+
+  wgpuQueueWriteBuffer(game.queue, game.block_selected_renderer.uniform_buffer, 0, &game.block_selected_renderer.uniforms, sizeof(game.block_selected_renderer.uniforms));
+
+  wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, game.block_selected_renderer.bind_group, 0, NULL);
+  wgpuRenderPassEncoderSetPipeline(render_pass_encoder, game.block_selected_renderer.render_pipeline);
+  wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, game.block_selected_renderer.vertex_buffer, 0, WGPU_WHOLE_SIZE);
+  wgpuRenderPassEncoderDraw(render_pass_encoder, 18*4*2, 1, 0, 0);
+}
+
 void load_block_models() {
   int num_id = 0;
   int max_id = -1;
@@ -1560,8 +1801,11 @@ int main(int argc, char *argv[]) {
   load_block_models();
   init_glfw();
   init_surface();
+  block_selected_renderer_init();
   chunk_renderer_init();
   sky_renderer_init();
+
+  // Init block overlay renderer
 
   int width, height;
   glfwGetWindowSize(game.window, &width, &height);
@@ -1668,6 +1912,7 @@ int main(int argc, char *argv[]) {
 
     sky_renderer_render(render_pass_encoder);
     chunk_renderer_render(render_pass_encoder);
+    block_selected_renderer_render(render_pass_encoder);
 
     wgpuRenderPassEncoderEnd(render_pass_encoder);
 
