@@ -238,9 +238,6 @@ static void handle_glfw_framebuffer_size(GLFWwindow *window, int width, int heig
     return;
   }
 
-  Game *game = glfwGetWindowUserPointer(window);
-  if (!game) return;
-
   update_window_size(width, height);
 }
 
