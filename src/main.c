@@ -44,11 +44,15 @@ typedef struct Uniforms {
 } Uniforms;
 
 typedef struct SkyUniforms {
-  float time;
+  vec3 look;
+  float aspect;
+  vec3 sky_color;
+  float time_of_day;
 } SkyUniforms;
 
 typedef struct SkyRenderer {
   WGPUShaderModule shader_module;
+  WGPUBindGroup bind_group;
   WGPURenderPipeline render_pipeline;
   WGPUPipelineLayout pipeline_layout;
   WGPUBuffer uniform_buffer;
@@ -1000,7 +1004,7 @@ void chunk_renderer_init() {
       },
       .depthStencil = &(WGPUDepthStencilState){
         .depthWriteEnabled = true,
-        .depthCompare = WGPUCompareFunction_Less,
+        .depthCompare = WGPUCompareFunction_LessEqual,
         .format = WGPUTextureFormat_Depth24Plus,
         .stencilBack = (WGPUStencilFaceState){
           .compare = WGPUCompareFunction_Always,
@@ -1039,7 +1043,7 @@ void chunk_renderer_init() {
   };
 }
 
-void chunk_renderer_render() {
+void chunk_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
   // Interpolate between last and current position for smooth movement
   vec3 position;
   glm_vec3_lerp(game.last_position, game.position, (game.current_time - game.last_tick_time) * TICKS_PER_SECOND, position);
@@ -1075,87 +1079,7 @@ void chunk_renderer_render() {
   game.uniforms.internal_sky_max = sky_max / 15.0f;
   float sky_color_scale = pow(glm_clamp((sky_max - 4.0) / 11.0, 0.0, 1.0), 3.0);
 
-  // Send uniforms to GPU
   wgpuQueueWriteBuffer(game.queue, game.uniform_buffer, 0, &game.uniforms, sizeof(game.uniforms));
-
-  WGPUSurfaceTexture surface_texture;
-  wgpuSurfaceGetCurrentTexture(game.surface, &surface_texture);
-  switch (surface_texture.status) {
-    case WGPUSurfaceGetCurrentTextureStatus_Success:
-      // All good, could check for `surface_texture.suboptimal` here.
-      break;
-    case WGPUSurfaceGetCurrentTextureStatus_Timeout:
-    case WGPUSurfaceGetCurrentTextureStatus_Outdated:
-    case WGPUSurfaceGetCurrentTextureStatus_Lost: {
-      // Skip this frame, and re-configure surface.
-      if (surface_texture.texture != NULL) {
-        wgpuTextureRelease(surface_texture.texture);
-      }
-      int width, height;
-      glfwGetWindowSize(game.window, &width, &height);
-      if (width != 0 && height != 0) {
-        update_window_size(width, height);
-      }
-      return;
-    }
-    case WGPUSurfaceGetCurrentTextureStatus_OutOfMemory:
-    case WGPUSurfaceGetCurrentTextureStatus_DeviceLost:
-    case WGPUSurfaceGetCurrentTextureStatus_Force32:
-      // Fatal error
-      printf(LOG_PREFIX " get_current_texture status=%#.8x\n", surface_texture.status);
-      abort();
-  }
-  assert(surface_texture.texture);
-
-  WGPUTextureView frame = wgpuTextureCreateView(surface_texture.texture, NULL);
-  assert(frame);
-
-  WGPUTextureView depth_frame = wgpuTextureCreateView(game.depth_texture, NULL);
-  assert(depth_frame);
-
-  WGPUCommandEncoder command_encoder = wgpuDeviceCreateCommandEncoder(
-    game.device,
-    &(const WGPUCommandEncoderDescriptor){
-      .label = "command_encoder",
-    }
-  );
-  assert(command_encoder);
-
-  vec3 sky_color;
-  world_get_sky_color(&game.world, game.position, game.biome_info, sky_color);
-
-  WGPURenderPassEncoder render_pass_encoder =
-    wgpuCommandEncoderBeginRenderPass(
-      command_encoder,
-      &(const WGPURenderPassDescriptor){
-        .label = "render_pass_encoder",
-        .colorAttachmentCount = 1,
-        .colorAttachments = (const WGPURenderPassColorAttachment[]){
-          (const WGPURenderPassColorAttachment){
-            .view = frame,
-            .loadOp = WGPULoadOp_Clear,
-            .storeOp = WGPUStoreOp_Store,
-            //  .depthSlice = WGPU_DEPTH_SLICE_UNDEFINED,
-            .clearValue = (const WGPUColor){
-              .r = pow(sky_color[0] * sky_color_scale, 2.2),
-              .g = pow(sky_color[1] * sky_color_scale, 2.2),
-              .b = pow(sky_color[2] * sky_color_scale, 2.2),
-              // .r = pow(0.431, 2.2),
-              // .g = pow(0.694, 2.2),
-              // .b = pow(1.000, 2.2),
-              .a = 1.0,
-            },
-          },
-        },
-        .depthStencilAttachment = &(WGPURenderPassDepthStencilAttachment){
-          .view = depth_frame,
-          .depthClearValue = 1.0f,
-          .depthLoadOp = WGPULoadOp_Clear,
-          .depthStoreOp = WGPUStoreOp_Store,
-        },
-      }
-    );
-  assert(render_pass_encoder);
 
   wgpuRenderPassEncoderSetIndexBuffer(render_pass_encoder, game.index_buffer, WGPUIndexFormat_Uint32, 0, WGPU_WHOLE_SIZE);
   wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, game.bind_group, 0, NULL);
@@ -1174,26 +1098,6 @@ void chunk_renderer_render() {
       wgpuRenderPassEncoderDrawIndexed(render_pass_encoder, chunk->sections[s].num_quads * 6, 1, 0, 0, 0);
     }
   }
-
-  wgpuRenderPassEncoderEnd(render_pass_encoder);
-
-  WGPUCommandBuffer command_buffer = wgpuCommandEncoderFinish(
-    command_encoder,
-    &(const WGPUCommandBufferDescriptor){
-      .label = "command_buffer",
-    }
-  );
-  assert(command_buffer);
-
-  wgpuQueueSubmit(game.queue, 1, (const WGPUCommandBuffer[]){command_buffer});
-  wgpuSurfacePresent(game.surface);
-
-  wgpuCommandBufferRelease(command_buffer);
-  wgpuRenderPassEncoderRelease(render_pass_encoder);
-  wgpuCommandEncoderRelease(command_encoder);
-  wgpuTextureViewRelease(frame);
-  wgpuTextureViewRelease(depth_frame);
-  wgpuTextureRelease(surface_texture.texture);
 }
 
 void sky_renderer_init() {
@@ -1218,7 +1122,7 @@ void sky_renderer_init() {
     -1.0f,
     1.0f,
     1.0f,
-    1.0f,
+    -1.0f,
     -1.0f,
     1.0f,
     1.0f,
@@ -1265,10 +1169,10 @@ void sky_renderer_init() {
     .entryCount = sizeof(bg_entries) / sizeof(bg_entries[0]),
     .entries = bg_entries,
   };
-  game.bind_group = wgpuDeviceCreateBindGroup(game.device, &bg_desc);
+  game.sky_renderer.bind_group = wgpuDeviceCreateBindGroup(game.device, &bg_desc);
 
   static const WGPUVertexAttribute vertex_attributes[] = {
-    {
+    [0] = {
       .format = WGPUVertexFormat_Float32x2,
       .offset = 0,
       .shaderLocation = 0,
@@ -1326,7 +1230,7 @@ void sky_renderer_init() {
       },
       .depthStencil = &(WGPUDepthStencilState){
         .depthWriteEnabled = true,
-        .depthCompare = WGPUCompareFunction_Less,
+        .depthCompare = WGPUCompareFunction_LessEqual,
         .format = WGPUTextureFormat_Depth24Plus,
         .stencilBack = (WGPUStencilFaceState){
           .compare = WGPUCompareFunction_Always,
@@ -1346,76 +1250,17 @@ void sky_renderer_init() {
   assert(game.sky_renderer.render_pipeline);
 }
 
-void sky_renderer_render() {
-  game.sky_renderer.uniforms.time = 0.5f;
-
-  // Send uniforms to GPU
+void sky_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
+  glm_vec3_copy(game.look, game.sky_renderer.uniforms.look);
+  game.sky_renderer.uniforms.aspect = (float)game.config.width / (float)game.config.height;
+  world_get_sky_color(&game.world, game.position, game.biome_info, game.sky_renderer.uniforms.sky_color);
+  game.sky_renderer.uniforms.time_of_day = game.time_of_day % 24000;
   wgpuQueueWriteBuffer(game.queue, game.sky_renderer.uniform_buffer, 0, &game.sky_renderer.uniforms, sizeof(game.sky_renderer.uniforms));
 
-  WGPUSurfaceTexture surface_texture;
-  wgpuSurfaceGetCurrentTexture(game.surface, &surface_texture);
-
-  WGPUTextureView frame = wgpuTextureCreateView(surface_texture.texture, NULL);
-  assert(frame);
-
-  WGPUTextureView depth_frame = wgpuTextureCreateView(game.depth_texture, NULL);
-  assert(depth_frame);
-
-  WGPUCommandEncoder command_encoder = wgpuDeviceCreateCommandEncoder(
-    game.device,
-    &(const WGPUCommandEncoderDescriptor){
-      .label = "sky command_encoder",
-    }
-  );
-  assert(command_encoder);
-
-  WGPURenderPassEncoder render_pass_encoder =
-    wgpuCommandEncoderBeginRenderPass(
-      command_encoder,
-      &(const WGPURenderPassDescriptor){
-        .label = "sky render_pass_encoder",
-        .colorAttachmentCount = 1,
-        .colorAttachments = (const WGPURenderPassColorAttachment[]){
-          (const WGPURenderPassColorAttachment){
-            .view = frame,
-            .loadOp = WGPULoadOp_Load,
-            .storeOp = WGPUStoreOp_Store,
-          },
-        },
-        .depthStencilAttachment = &(WGPURenderPassDepthStencilAttachment){
-          .view = depth_frame,
-          .depthLoadOp = WGPULoadOp_Load,
-          .depthStoreOp = WGPUStoreOp_Discard,
-        },
-      }
-    );
-  assert(render_pass_encoder);
-
-  wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, game.bind_group, 0, NULL);
+  wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, game.sky_renderer.bind_group, 0, NULL);
   wgpuRenderPassEncoderSetPipeline(render_pass_encoder, game.sky_renderer.render_pipeline);
-
   wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, game.sky_renderer.vertex_buffer, 0, WGPU_WHOLE_SIZE);
   wgpuRenderPassEncoderDraw(render_pass_encoder, 6, 1, 0, 0);
-
-  wgpuRenderPassEncoderEnd(render_pass_encoder);
-
-  WGPUCommandBuffer command_buffer = wgpuCommandEncoderFinish(
-    command_encoder,
-    &(const WGPUCommandBufferDescriptor){
-      .label = "sky command_buffer",
-    }
-  );
-  assert(command_buffer);
-
-  wgpuQueueSubmit(game.queue, 1, (const WGPUCommandBuffer[]){command_buffer});
-  wgpuSurfacePresent(game.surface);
-
-  wgpuCommandBufferRelease(command_buffer);
-  wgpuRenderPassEncoderRelease(render_pass_encoder);
-  wgpuCommandEncoderRelease(command_encoder);
-  wgpuTextureViewRelease(frame);
-  wgpuTextureViewRelease(depth_frame);
-  wgpuTextureRelease(surface_texture.texture);
 }
 
 void load_block_models() {
@@ -1716,7 +1561,7 @@ int main(int argc, char *argv[]) {
   init_glfw();
   init_surface();
   chunk_renderer_init();
-  // sky_renderer_init();
+  sky_renderer_init();
 
   int width, height;
   glfwGetWindowSize(game.window, &width, &height);
@@ -1748,8 +1593,101 @@ int main(int argc, char *argv[]) {
     }
     game.last_render_time = game.current_time;
 
-    // sky_renderer_render();
-    chunk_renderer_render();
+    WGPUSurfaceTexture surface_texture;
+    wgpuSurfaceGetCurrentTexture(game.surface, &surface_texture);
+    switch (surface_texture.status) {
+      case WGPUSurfaceGetCurrentTextureStatus_Success:
+        // All good, could check for `surface_texture.suboptimal` here.
+        break;
+      case WGPUSurfaceGetCurrentTextureStatus_Timeout:
+      case WGPUSurfaceGetCurrentTextureStatus_Outdated:
+      case WGPUSurfaceGetCurrentTextureStatus_Lost: {
+        // Skip this frame, and re-configure surface.
+        if (surface_texture.texture != NULL) {
+          wgpuTextureRelease(surface_texture.texture);
+        }
+        int width, height;
+        glfwGetWindowSize(game.window, &width, &height);
+        if (width != 0 && height != 0) {
+          update_window_size(width, height);
+        }
+        continue;
+      }
+      case WGPUSurfaceGetCurrentTextureStatus_OutOfMemory:
+      case WGPUSurfaceGetCurrentTextureStatus_DeviceLost:
+      case WGPUSurfaceGetCurrentTextureStatus_Force32:
+        // Fatal error
+        printf(LOG_PREFIX " get_current_texture status=%#.8x\n", surface_texture.status);
+        abort();
+    }
+    assert(surface_texture.texture);
+
+    WGPUTextureView frame = wgpuTextureCreateView(surface_texture.texture, NULL);
+    assert(frame);
+
+    WGPUTextureView depth_frame = wgpuTextureCreateView(game.depth_texture, NULL);
+    assert(depth_frame);
+
+    WGPUCommandEncoder command_encoder = wgpuDeviceCreateCommandEncoder(
+      game.device,
+      &(const WGPUCommandEncoderDescriptor){
+        .label = "command_encoder",
+      }
+    );
+    assert(command_encoder);
+
+    WGPURenderPassEncoder render_pass_encoder =
+      wgpuCommandEncoderBeginRenderPass(
+        command_encoder,
+        &(const WGPURenderPassDescriptor){
+          .label = "render_pass_encoder",
+          .colorAttachmentCount = 1,
+          .colorAttachments = (const WGPURenderPassColorAttachment[]){
+            (const WGPURenderPassColorAttachment){
+              .view = frame,
+              .loadOp = WGPULoadOp_Clear,
+              .storeOp = WGPUStoreOp_Store,
+              //  .depthSlice = WGPU_DEPTH_SLICE_UNDEFINED,
+              .clearValue = (const WGPUColor){
+                .r = 0.0,
+                .g = 0.0,
+                .b = 0.0,
+                .a = 1.0,
+              },
+            },
+          },
+          .depthStencilAttachment = &(WGPURenderPassDepthStencilAttachment){
+            .view = depth_frame,
+            .depthClearValue = 1.0f,
+            .depthLoadOp = WGPULoadOp_Clear,
+            .depthStoreOp = WGPUStoreOp_Store,
+          },
+        }
+      );
+    assert(render_pass_encoder);
+
+    sky_renderer_render(render_pass_encoder);
+    chunk_renderer_render(render_pass_encoder);
+
+    wgpuRenderPassEncoderEnd(render_pass_encoder);
+
+    WGPUCommandBuffer command_buffer = wgpuCommandEncoderFinish(
+      command_encoder,
+      &(const WGPUCommandBufferDescriptor){
+        .label = "command_buffer",
+      }
+    );
+    assert(command_buffer);
+
+    wgpuQueueSubmit(game.queue, 1, (const WGPUCommandBuffer[]){command_buffer});
+    wgpuSurfacePresent(game.surface);
+
+    wgpuCommandBufferRelease(command_buffer);
+    wgpuRenderPassEncoderRelease(render_pass_encoder);
+    wgpuCommandEncoderRelease(command_encoder);
+    wgpuTextureViewRelease(frame);
+    wgpuTextureViewRelease(depth_frame);
+    wgpuTextureRelease(surface_texture.texture);
   }
 
   // Free chunks
