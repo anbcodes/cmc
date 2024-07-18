@@ -326,7 +326,6 @@ mcapiBlockFace face_from_normal(vec3 normal) {
 }
 
 static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int action, int mods) {
-  static int seq_num = 12;
   UNUSED(mods)
 
   switch (action) {
@@ -351,7 +350,7 @@ static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int act
             game.block_breaking_position[0] = floor(target[0]);
             game.block_breaking_position[1] = floor(target[1]);
             game.block_breaking_position[2] = floor(target[2]);
-            game.block_breaking_seq_num = seq_num;
+            game.block_breaking_seq_num++;
             mcapi_send_player_action(game.conn, (mcapiPlayerActionPacket){
                                                   .face = game.block_breaking_face,
                                                   .position = {game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2]},
@@ -359,8 +358,6 @@ static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int act
                                                   .sequence_num = game.block_breaking_seq_num,
                                                 });
             printf("Sending break start face=%d, x=%d, y=%d, z=%d, seq=%d\n", game.block_breaking_face, game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2], game.block_breaking_seq_num);
-
-            seq_num++;
             break;
           case GLFW_MOUSE_BUTTON_RIGHT:
             vec3 air_position;
@@ -1461,7 +1458,7 @@ void block_selected_renderer_init() {
   float vertices[18 * 4 * 6];
 
   int i = 0;
-  float s = 0.01;
+  float s = 0.005;
 
   for (int d = 0; d <= 2; d++) {
     for (int p = 0; p <= 1; p++) {
@@ -1647,6 +1644,34 @@ void block_selected_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
   game.block_selected_renderer.uniforms.position[0] = floor(game.block_selected_renderer.uniforms.position[0]);
   game.block_selected_renderer.uniforms.position[1] = floor(game.block_selected_renderer.uniforms.position[1]);
   game.block_selected_renderer.uniforms.position[2] = floor(game.block_selected_renderer.uniforms.position[2]);
+
+  int tx = floor(game.block_selected_renderer.uniforms.position[0]);
+  int ty = floor(game.block_selected_renderer.uniforms.position[1]);
+  int tz = floor(game.block_selected_renderer.uniforms.position[2]);
+
+  if (game.block_breaking_start != 0 && (tx != game.block_breaking_position[0] || ty != game.block_breaking_position[1] || tz != game.block_breaking_position[2])) {
+    mcapi_send_player_action(game.conn, (mcapiPlayerActionPacket){
+                                          .face = game.block_breaking_face,
+                                          .position = {game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2]},
+                                          .status = MCAPI_ACTION_DIG_CANCEL,
+                                          .sequence_num = game.block_breaking_seq_num,
+                                        });
+
+    game.block_breaking_position[0] = tx;
+    game.block_breaking_position[1] = ty;
+    game.block_breaking_position[2] = tz;
+    game.block_breaking_start = game.current_time;
+    game.block_breaking_face = face_from_normal(normal);
+    game.block_breaking_seq_num++;
+
+    mcapi_send_player_action(game.conn, (mcapiPlayerActionPacket){
+                                          .face = game.block_breaking_face,
+                                          .position = {game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2]},
+                                          .status = MCAPI_ACTION_DIG_START,
+                                          .sequence_num = game.block_breaking_seq_num,
+                                        });
+    printf("Sending break start face=%d, x=%d, y=%d, z=%d, seq=%d\n", game.block_breaking_face, game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2], game.block_breaking_seq_num);
+  }
 
   wgpuQueueWriteBuffer(game.queue, game.block_selected_renderer.uniform_buffer, 0, &game.block_selected_renderer.uniforms, sizeof(game.block_selected_renderer.uniforms));
 
@@ -2021,6 +2046,61 @@ void generate_block_breaking_mesh() {
   }
 }
 
+void update_block_breaking_stages() {
+  float block_destruction_time = 1.5 * 0.6;
+
+  if (game.block_breaking_start != 0 && game.current_time - game.block_breaking_start > block_destruction_time) {
+    vec3 pos;
+    pos[0] = game.block_breaking_position[0];
+    pos[1] = game.block_breaking_position[1];
+    pos[2] = game.block_breaking_position[2];
+    world_set_block(&game.world, pos, 0, game.block_info, game.biome_info, game.device);
+    mcapi_send_player_action(game.conn, (mcapiPlayerActionPacket){
+                                          .face = game.block_breaking_face,
+                                          .position = {game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2]},
+                                          .status = MCAPI_ACTION_DIG_FINISH,
+                                          .sequence_num = game.block_breaking_seq_num,
+                                        });
+    printf("Sending block broken face=%d, x=%d, y=%d, z=%d, seq=%d\n", game.block_breaking_face, game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2], game.block_breaking_seq_num);
+    game.block_breaking_start = 0;
+  }
+
+  // Calculate block breaking stage
+  bool changed = false;
+
+  if (game.block_breaking_start != 0) {
+    if (game.number_of_blocks_being_broken == 0 || !glm_ivec3_eqv(game.blocks_being_broken[0].position, game.block_breaking_position)) {
+      game.number_of_blocks_being_broken = 1;
+      game.blocks_being_broken[0].position[0] = game.block_breaking_position[0];
+      game.blocks_being_broken[0].position[1] = game.block_breaking_position[1];
+      game.blocks_being_broken[0].position[2] = game.block_breaking_position[2];
+      changed = true;
+    }
+
+    int new_stage = (game.current_time - game.block_breaking_start) / block_destruction_time * 10;
+
+    if (game.blocks_being_broken[0].stage != new_stage) {
+      game.blocks_being_broken[0].stage = new_stage;
+      changed = true;
+    }
+  } else {
+    if (game.number_of_blocks_being_broken != 0) {
+      game.number_of_blocks_being_broken = 0;
+    }
+  }
+
+  // Generate block breaking mesh
+  if (changed) {
+    generate_block_breaking_mesh();
+    wgpuQueueWriteBuffer(game.queue, game.block_overlay_vertex_buffer, 0, &game.block_overlay_buffer, sizeof(game.block_overlay_buffer));
+  }
+}
+
+void tick() {
+  update_player_position((float)(1.0 / TICKS_PER_SECOND));
+  update_block_breaking_stages();
+}
+
 int main(int argc, char *argv[]) {
   if (argc < 6) {
     perror("Usage: cmc [username] [server ip] [port] [uuid] [access_token]\n");
@@ -2086,9 +2166,7 @@ int main(int argc, char *argv[]) {
 
     double delta_tick_time = game.current_time - game.last_tick_time;
     if (delta_tick_time >= game.target_tick_time) {
-      // update_player_position(&game, (float)deltaTickTime);
-      // Force the update to be one tick
-      update_player_position((float)(1.0 / TICKS_PER_SECOND));
+      tick();
       game.last_tick_time = game.current_time;
     }
 
@@ -2099,54 +2177,6 @@ int main(int argc, char *argv[]) {
     game.last_render_time = game.current_time;
 
     // Update block destruction
-
-    float block_destruction_time = 5 * 0.5;
-
-    if (game.block_breaking_start != 0 && game.current_time - game.block_breaking_start > block_destruction_time) {
-      vec3 pos;
-      pos[0] = game.block_breaking_position[0];
-      pos[1] = game.block_breaking_position[1];
-      pos[2] = game.block_breaking_position[2];
-      world_set_block(&game.world, pos, 0, game.block_info, game.biome_info, game.device);
-      mcapi_send_player_action(game.conn, (mcapiPlayerActionPacket){
-                                            .face = game.block_breaking_face,
-                                            .position = {game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2]},
-                                            .status = MCAPI_ACTION_DIG_FINISH,
-                                            .sequence_num = game.block_breaking_seq_num,
-                                          });
-      printf("Sending block broken face=%d, x=%d, y=%d, z=%d, seq=%d\n", game.block_breaking_face, game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2], game.block_breaking_seq_num);
-      game.block_breaking_start = 0;
-    }
-
-    // Calculate block breaking stage
-    bool changed = false;
-
-    if (game.block_breaking_start != 0) {
-      if (game.number_of_blocks_being_broken == 0) {
-        game.number_of_blocks_being_broken = 1;
-        game.blocks_being_broken[0].position[0] = game.block_breaking_position[0];
-        game.blocks_being_broken[0].position[1] = game.block_breaking_position[1];
-        game.blocks_being_broken[0].position[2] = game.block_breaking_position[2];
-        changed = true;
-      }
-
-      int new_stage = (game.current_time - game.block_breaking_start) / block_destruction_time * 10;
-
-      if (game.blocks_being_broken[0].stage != new_stage) {
-        game.blocks_being_broken[0].stage = new_stage;
-        changed = true;
-      }
-    } else {
-      if (game.number_of_blocks_being_broken != 0) {
-        game.number_of_blocks_being_broken = 0;
-      }
-    }
-
-    // Generate block breaking mesh
-    if (changed) {
-      generate_block_breaking_mesh();
-      wgpuQueueWriteBuffer(game.queue, game.block_overlay_vertex_buffer, 0, &game.block_overlay_buffer, sizeof(game.block_overlay_buffer));
-    }
 
     WGPUSurfaceTexture surface_texture;
     wgpuSurfaceGetCurrentTexture(game.surface, &surface_texture);
