@@ -681,7 +681,13 @@ void on_finish_config(mcapiConnection *conn) {
 }
 
 void on_chunk(mcapiConnection *conn, mcapiChunkAndLightDataPacket packet) {
-  Chunk *chunk = malloc(sizeof(Chunk));
+  Chunk *chunk = world_chunk(&game.world, packet.chunk_x, packet.chunk_z);
+  bool is_new = false;
+  if (chunk == NULL) {
+    chunk = malloc(sizeof(Chunk));
+    is_new = true;
+  }
+
   chunk->x = packet.chunk_x;
   chunk->z = packet.chunk_z;
   for (int i = 0; i < 24; i++) {
@@ -694,8 +700,36 @@ void on_chunk(mcapiConnection *conn, mcapiChunkAndLightDataPacket packet) {
     memcpy(chunk->sections[i].sky_light, packet.sky_light_array[i + 1], 4096);
     memcpy(chunk->sections[i].block_light, packet.block_light_array[i + 1], 4096);
   }
-  world_add_chunk(&game.world, chunk);
+  if (is_new) {
+    world_add_chunk(&game.world, chunk);
+  }
   world_init_new_meshes(&game.world, game.block_info, game.biome_info, game.device);
+}
+
+void on_light(mcapiConnection *conn, mcapiUpdateLightPacket packet) {
+  printf("Light updated!!! %d, %d\n", packet.chunk_x, packet.chunk_z);
+  Chunk *chunk = world_chunk(&game.world, packet.chunk_x, packet.chunk_z);
+  if (chunk == NULL) {
+    printf("Chunk not loaded!\n");
+    return;
+  }
+  perror("In!\n");
+  for (int i = 0; i < 24; i++) {
+    memcpy(chunk->sections[i].sky_light, packet.sky_light_array[i + 1], 4096);
+    memcpy(chunk->sections[i].block_light, packet.block_light_array[i + 1], 4096);
+  }
+  world_init_new_meshes(&game.world, game.block_info, game.biome_info, game.device);
+}
+
+void on_block_update(mcapiConnection *conn, mcapiBlockUpdatePacket packet) {
+  vec3 pos;
+  pos[0] = packet.position[0];
+  pos[1] = packet.position[1];
+  pos[2] = packet.position[2];
+
+  printf("Block update %d %d %d\n", packet.position[0], packet.position[1], packet.position[2]);
+
+  world_set_block(&game.world, pos, packet.block_id, game.block_info, game.biome_info, game.device);
 }
 
 void on_position(mcapiConnection *conn, mcapiSynchronizePlayerPositionPacket packet) {
@@ -811,6 +845,8 @@ void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char 
   mcapi_set_clientbound_known_packs_cb(conn, on_known_packs);
   mcapi_set_finish_config_cb(conn, on_finish_config);
   mcapi_set_chunk_and_light_data_cb(conn, on_chunk);
+  mcapi_set_update_light_cb(conn, on_light);
+  mcapi_set_block_update_cb(conn, on_block_update);
   mcapi_set_synchronize_player_position_cb(conn, on_position);
   mcapi_set_registry_data_cb(conn, on_registry);
   mcapi_set_update_time_cb(conn, on_update_time);
@@ -1963,7 +1999,7 @@ void generate_block_breaking_mesh() {
     pos[1] = game.blocks_being_broken[block].position[1];
     pos[2] = game.blocks_being_broken[block].position[2];
     int texture = game.destroy_stage_textures[game.blocks_being_broken[block].stage];
-    printf("Blocks being broken stage %d, texture %d\n", game.blocks_being_broken[block].stage, texture);
+    // printf("Blocks being broken stage %d, texture %d\n", game.blocks_being_broken[block].stage, texture);
 
     for (int d = 0; d <= 2; d++) {
       int d1 = (d + 1) % 3;

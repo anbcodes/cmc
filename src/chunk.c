@@ -218,7 +218,6 @@ void world_init_new_meshes(World *world, BlockInfo *block_info, BiomeInfo *biome
   }
 }
 
-
 int face_material_between(int a, int b, BlockInfo *block_info) {
   if (a == 0 && b == 0) {
     return 0;

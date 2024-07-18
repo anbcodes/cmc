@@ -359,10 +359,11 @@ UUID read_uuid(ReadableBuffer *io) {
 }
 
 void read_ipos_into(ReadableBuffer *io, ivec3 pos) {
-  uint64_t packed = read_ulong(io);
+  int64_t packed = read_long(io);
+
   pos[0] = packed >> 38;
-  pos[1] = packed & 0xFFF;
-  pos[2] = packed & 0x3ffffff000 >> 12;
+  pos[1] = packed << 52 >> 52;
+  pos[2] = packed << 26 >> 38;
 }
 
 void read_compressed_long_arr(ReadableBuffer *p, int bits_per_entry, int entries, int compressed_len, int to[]) {

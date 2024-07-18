@@ -305,8 +305,10 @@ struct mcapiConnection {
   void (*clientbound_known_packs_cb)(mcapiConnection *, mcapiClientboundKnownPacksPacket);
   void (*registry_data_cb)(mcapiConnection *, mcapiRegistryDataPacket);
   void (*chunk_and_light_data_cb)(mcapiConnection *, mcapiChunkAndLightDataPacket);
+  void (*update_light_cb)(mcapiConnection *, mcapiUpdateLightPacket);
   void (*synchronize_player_position_cb)(mcapiConnection *, mcapiSynchronizePlayerPositionPacket);
   void (*update_time_cb)(mcapiConnection *, mcapiUpdateTimePacket);
+  void (*block_update_cb)(mcapiConnection *, mcapiBlockUpdatePacket);
 
   // Play
 };
@@ -681,6 +683,58 @@ void destroy_registry_data_packet(mcapiRegistryDataPacket p) {
   free(p.entries);
 }
 
+void read_light_data_from_packet(ReadableBuffer *p, uint8_t block_light_array[26][4096], uint8_t sky_light_array[26][4096]) {
+  BitSet sky_light_mask = read_bitset(p);
+  BitSet block_light_mask = read_bitset(p);
+  BitSet empty_sky_light_mask = read_bitset(p);
+  BitSet empty_block_light_mask = read_bitset(p);
+
+  int sky_light_array_count = read_varint(p);
+  int sky_data_count = 0;
+  for (int i = 0; i < 24 + 2; i++) {
+    if (bitset_at(sky_light_mask, i)) {
+      sky_data_count += 1;
+      int length = read_varint(p);
+      assert(length == 2048);
+      Buffer buffer = read_bytes(p, length);
+      // Expand from half-bytes to full-bytes for convenience to the client
+      for (int ind = 0; ind < 4096; ind += 1) {
+        sky_light_array[i][ind] = buffer.ptr[ind / 2] >> (4 * (ind % 2)) & 0x0F;
+      }
+    } else if (bitset_at(empty_sky_light_mask, i)) {
+      memset(sky_light_array[i], 0x0, 4096);
+    } else {
+      memset(sky_light_array[i], 0xf, 4096);
+    }
+  }
+  assert(sky_data_count == sky_light_array_count);
+
+  int block_light_array_count = read_varint(p);
+  int block_data_count = 0;
+  for (int i = 0; i < 24 + 2; i++) {
+    if (bitset_at(block_light_mask, i)) {
+      block_data_count += 1;
+      int length = read_varint(p);
+      assert(length == 2048);
+      Buffer buffer = read_bytes(p, length);
+      // Expand from half-bytes to full-bytes for convenience to the client
+      for (int ind = 0; ind < 4096; ind += 1) {
+        block_light_array[i][ind] = buffer.ptr[ind / 2] >> (4 * (ind % 2)) & 0x0F;
+      }
+    } else if (bitset_at(empty_block_light_mask, i)) {
+      memset(block_light_array[i], 0x0, 4096);
+    } else {
+      memset(block_light_array[i], 0xf, 4096);
+    }
+  }
+  assert(block_data_count == block_light_array_count);
+
+  destroy_bitset(sky_light_mask);
+  destroy_bitset(block_light_mask);
+  destroy_bitset(empty_sky_light_mask);
+  destroy_bitset(empty_block_light_mask);
+}
+
 mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *p) {
   mcapiChunkAndLightDataPacket res = {};
   res.chunk_x = read_int(p);
@@ -771,56 +825,7 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
   }
 
   // Sky and block lights
-
-  BitSet sky_light_mask = read_bitset(p);
-  BitSet block_light_mask = read_bitset(p);
-  BitSet empty_sky_light_mask = read_bitset(p);
-  BitSet empty_block_light_mask = read_bitset(p);
-
-  int sky_light_array_count = read_varint(p);
-  int sky_data_count = 0;
-  for (int i = 0; i < 24 + 2; i++) {
-    if (bitset_at(sky_light_mask, i)) {
-      sky_data_count += 1;
-      int length = read_varint(p);
-      assert(length == 2048);
-      Buffer buffer = read_bytes(p, length);
-      // Expand from half-bytes to full-bytes for convenience to the client
-      for (int ind = 0; ind < 4096; ind += 1) {
-        res.sky_light_array[i][ind] = buffer.ptr[ind / 2] >> (4 * (ind % 2)) & 0x0F;
-      }
-    } else if (bitset_at(empty_sky_light_mask, i)) {
-      memset(res.sky_light_array[i], 0x0, 4096);
-    } else {
-      memset(res.sky_light_array[i], 0xf, 4096);
-    }
-  }
-  assert(sky_data_count == sky_light_array_count);
-
-  int block_light_array_count = read_varint(p);
-  int block_data_count = 0;
-  for (int i = 0; i < 24 + 2; i++) {
-    if (bitset_at(block_light_mask, i)) {
-      block_data_count += 1;
-      int length = read_varint(p);
-      assert(length == 2048);
-      Buffer buffer = read_bytes(p, length);
-      // Expand from half-bytes to full-bytes for convenience to the client
-      for (int ind = 0; ind < 4096; ind += 1) {
-        res.block_light_array[i][ind] = buffer.ptr[ind / 2] >> (4 * (ind % 2)) & 0x0F;
-      }
-    } else if (bitset_at(empty_block_light_mask, i)) {
-      memset(res.block_light_array[i], 0x0, 4096);
-    } else {
-      memset(res.block_light_array[i], 0xf, 4096);
-    }
-  }
-  assert(block_data_count == block_light_array_count);
-
-  destroy_bitset(sky_light_mask);
-  destroy_bitset(block_light_mask);
-  destroy_bitset(empty_sky_light_mask);
-  destroy_bitset(empty_block_light_mask);
+  read_light_data_from_packet(p, res.block_light_array, res.sky_light_array);
 
   return res;
 }
@@ -832,6 +837,15 @@ void destroy_chunk_and_light_data_packet(mcapiChunkAndLightDataPacket p) {
     destroy_nbt(p.block_entities[i].data);
   }
   free(p.block_entities);
+}
+
+mcapiUpdateLightPacket read_update_light_packet(ReadableBuffer *p) {
+  mcapiUpdateLightPacket res = {};
+  res.chunk_x = read_varint(p);
+  res.chunk_z = read_varint(p);
+
+  read_light_data_from_packet(p, res.block_light_array, res.sky_light_array);
+  return res;
 }
 
 mcapiSynchronizePlayerPositionPacket create_synchronize_player_position_data_packet(ReadableBuffer *p) {
@@ -853,6 +867,13 @@ mcapiUpdateTimePacket create_update_time_packet(ReadableBuffer *p) {
   return res;
 }
 
+mcapiBlockUpdatePacket read_block_update_packet(ReadableBuffer *p) {
+  mcapiBlockUpdatePacket res = {};
+  read_ipos_into(p, res.position);
+  res.block_id = read_varint(p);
+  return res;
+}
+
 #define mcapi_setcb_func(name, packet)                                                       \
   void mcapi_set_##name##_cb(mcapiConnection *conn, void (*cb)(mcapiConnection *, packet)) { \
     conn->name##_cb = cb;                                                                    \
@@ -869,6 +890,8 @@ mcapi_setcb_func(set_block_destroy_stage, mcapiSetBlockDestroyStagePacket);
 mcapi_setcb_func(clientbound_known_packs, mcapiClientboundKnownPacksPacket);
 mcapi_setcb_func(registry_data, mcapiRegistryDataPacket);
 mcapi_setcb_func(chunk_and_light_data, mcapiChunkAndLightDataPacket);
+mcapi_setcb_func(update_light, mcapiUpdateLightPacket);
+mcapi_setcb_func(block_update, mcapiBlockUpdatePacket);
 mcapi_setcb_func(synchronize_player_position, mcapiSynchronizePlayerPositionPacket);
 mcapi_setcb_func(update_time, mcapiUpdateTimePacket);
 
@@ -1128,6 +1151,14 @@ void mcapi_poll(mcapiConnection *conn) {
               mcapiChunkAndLightDataPacket chunk_packet = create_chunk_and_light_data_packet(&curr_packet);
               if (conn->chunk_and_light_data_cb) (*conn->chunk_and_light_data_cb)(conn, chunk_packet);
               destroy_chunk_and_light_data_packet(chunk_packet);
+              break;
+            case UPDATE_LIGHT:
+              mcapiUpdateLightPacket light_packet = read_update_light_packet(&curr_packet);
+              if (conn->update_light_cb) (*conn->update_light_cb)(conn, light_packet);
+              break;
+            case BLOCK_UPDATE:
+              mcapiBlockUpdatePacket bu_packet = read_block_update_packet(&curr_packet);
+              if (conn->block_update_cb) (*conn->block_update_cb)(conn, bu_packet);
               break;
             case SYNCHRONIZE_PLAYER_POSITION:
               mcapiSynchronizePlayerPositionPacket sync_packet = create_synchronize_player_position_data_packet(&curr_packet);

@@ -183,6 +183,22 @@ typedef struct mcapiChunkAndLightDataPacket {
 
 void mcapi_set_chunk_and_light_data_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiChunkAndLightDataPacket));
 
+typedef struct mcapiUpdateLightPacket {
+  int chunk_x;
+  int chunk_z;
+  uint8_t sky_light_array[26][4096];
+  uint8_t block_light_array[26][4096];
+} mcapiUpdateLightPacket;
+
+void mcapi_set_update_light_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiUpdateLightPacket));
+
+typedef struct mcapiBlockUpdatePacket {
+  ivec3 position;
+  int block_id;  // The new block id
+} mcapiBlockUpdatePacket;
+
+void mcapi_set_block_update_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiBlockUpdatePacket));
+
 typedef struct mcapiSynchronizePlayerPositionPacket {
   double x;
   double y;
