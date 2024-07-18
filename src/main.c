@@ -33,6 +33,9 @@
 // #define TEXTURE_TILES 32
 #define TEXTURE_TILES 40
 
+// The max number of blocks that can be being broken at the same time
+#define MAX_CONCURRENT_BLOCK_BREAKING 50
+
 const float COLLISION_EPSILON = 0.001f;
 const float TURN_SPEED = 0.002f;
 const float TICKS_PER_SECOND = 20.0f;
@@ -76,6 +79,11 @@ typedef struct BlockSelectedRenderer {
   WGPUBuffer vertex_buffer;
 } BlockSelectedRenderer;
 
+typedef struct BlockBeingBroken {
+  ivec3 position;
+  int stage;
+} BlockBeingBroken;
+
 typedef struct Game {
   WGPUInstance instance;
   WGPUSurface surface;
@@ -89,6 +97,7 @@ typedef struct Game {
   WGPUBuffer index_buffer;
   WGPUBindGroup bind_group;
   WGPURenderPipeline render_pipeline;
+  WGPURenderPipeline render_pipeline_transparent;
   WGPUBuffer uniform_buffer;
   Uniforms uniforms;
   WGPUPipelineLayout pipeline_layout;
@@ -118,12 +127,25 @@ typedef struct Game {
   World world;
   mcapiConnection *conn;
   unsigned char texture_sheet[TEXTURE_SIZE * TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_TILES * 4];
+  int next_texture_loc;
   cJSON *blocks;
   double target_render_time;
   double last_render_time;
   double target_tick_time;
   double last_tick_time;
   double current_time;
+
+  double block_breaking_start;
+  ivec3 block_breaking_position;
+  mcapiBlockFace block_breaking_face;
+  int block_breaking_seq_num;
+
+  int destroy_stage_textures[10];
+  WGPUBuffer block_overlay_vertex_buffer;
+  float block_overlay_buffer[FLOATS_PER_VERTEX * 4 * 6 * MAX_CONCURRENT_BLOCK_BREAKING];
+
+  int number_of_blocks_being_broken;
+  BlockBeingBroken blocks_being_broken[MAX_CONCURRENT_BLOCK_BREAKING];
 } Game;
 
 Game game = {
@@ -135,6 +157,7 @@ Game game = {
   .look = {0.0f, 0.0f, 1.0f},
   .eye_height = 1.62,
   .size = {0.6, 1.8, 0.6},
+  .next_texture_loc = 1,
 };
 
 unsigned char *load_image(const char *filename, unsigned *width, unsigned *height) {
@@ -285,6 +308,23 @@ static void handle_glfw_cursor_pos(GLFWwindow *window, double xpos, double ypos)
   glm_vec3_normalize(game.look);
 }
 
+mcapiBlockFace face_from_normal(vec3 normal) {
+  if (normal[0] == 1)
+    return MCAPI_FACE_EAST;
+  else if (normal[0] == -1)
+    return MCAPI_FACE_WEST;
+  else if (normal[1] == 1)
+    return MCAPI_FACE_TOP;
+  else if (normal[1] == -1)
+    return MCAPI_FACE_BOTTOM;
+  else if (normal[2] == 1)
+    return MCAPI_FACE_SOUTH;
+  else if (normal[2] == -1)
+    return MCAPI_FACE_NORTH;
+  else
+    perror("Invalid normal!");
+}
+
 static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int action, int mods) {
   static int seq_num = 12;
   UNUSED(mods)
@@ -305,13 +345,21 @@ static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int act
       if (material != 0) {
         switch (button) {
           case GLFW_MOUSE_BUTTON_LEFT:
-            world_set_block(&game.world, target, 0, game.block_info, game.biome_info, game.device);
+            mcapiBlockFace face = face_from_normal(normal);
+            game.block_breaking_start = game.current_time;
+            game.block_breaking_face = face;
+            game.block_breaking_position[0] = floor(target[0]);
+            game.block_breaking_position[1] = floor(target[1]);
+            game.block_breaking_position[2] = floor(target[2]);
+            game.block_breaking_seq_num = seq_num;
             mcapi_send_player_action(game.conn, (mcapiPlayerActionPacket){
-                                                  .face = MCAPI_FACE_EAST,
-                                                  .position = {target[0], target[1], target[2]},
+                                                  .face = game.block_breaking_face,
+                                                  .position = {game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2]},
                                                   .status = MCAPI_ACTION_DIG_START,
-                                                  .sequence_num = seq_num,
+                                                  .sequence_num = game.block_breaking_seq_num,
                                                 });
+            printf("Sending break start face=%d, x=%d, y=%d, z=%d, seq=%d\n", game.block_breaking_face, game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2], game.block_breaking_seq_num);
+
             seq_num++;
             break;
           case GLFW_MOUSE_BUTTON_RIGHT:
@@ -322,6 +370,20 @@ static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int act
         }
       }
       break;
+    case GLFW_RELEASE:
+      switch (button) {
+        case GLFW_MOUSE_BUTTON_LEFT:
+          if (game.block_breaking_start != 0) {
+            mcapi_send_player_action(game.conn, (mcapiPlayerActionPacket){
+                                                  .face = MCAPI_FACE_BOTTOM,  // Face is always set to -Y
+                                                  .position = {game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2]},
+                                                  .status = MCAPI_ACTION_DIG_CANCEL,
+                                                  .sequence_num = game.block_breaking_seq_num,
+                                                });
+            printf("Sending break cancel face=%d, x=%d, y=%d, z=%d, seq=%d\n", game.block_breaking_face, game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2], game.block_breaking_seq_num);
+            game.block_breaking_start = 0;
+          }
+      }
   }
 }
 
@@ -666,17 +728,11 @@ void on_update_time(mcapiConnection *conn, mcapiUpdateTimePacket packet) {
   game.time_of_day = packet.time_of_day;
 }
 
-int add_texture(cJSON *textures, const char *name, unsigned char *texture_sheet, int *cur_texture) {
-  char fname[1000];
-  cJSON *texture = cJSON_GetObjectItemCaseSensitive(textures, name);
-  if (texture == NULL) {
-    return 0;
-  }
-  char *texture_name = texture->valuestring;
-  if (strncmp(texture_name, "minecraft:", 10) == 0) {
-    texture_name += 10;
-  }
-  snprintf(fname, 1000, "data/assets/minecraft/textures/%s.png", texture_name);
+void on_set_block_destroy_stage(mcapiConnection *conn, mcapiSetBlockDestroyStagePacket packet) {
+  printf("Destroy stage %d\n", packet.stage);
+}
+
+int add_file_texture_to_image_sub_opacity(const char *fname, unsigned char *texture_sheet, int *cur_texture, int sub_opacity) {
   unsigned int width, height;
   unsigned char *rgba = load_image(fname, &width, &height);
   if (rgba == NULL) {
@@ -685,6 +741,7 @@ int add_texture(cJSON *textures, const char *name, unsigned char *texture_sheet,
     // } else {
     //   printf("%s found for %s, %d\n", name, texture_name, *cur_texture);
   }
+
   int texture_id = *cur_texture;
   *cur_texture += 1;
   int full_width = TEXTURE_SIZE * TEXTURE_TILES;
@@ -700,12 +757,30 @@ int add_texture(cJSON *textures, const char *name, unsigned char *texture_sheet,
       texture_sheet[j + 0] = rgba[i + 0];
       texture_sheet[j + 1] = rgba[i + 1];
       texture_sheet[j + 2] = rgba[i + 2];
-      texture_sheet[j + 3] = rgba[i + 3];
+      texture_sheet[j + 3] = max(rgba[i + 3] - sub_opacity, 0);
     }
   }
 
   free(rgba);
   return texture_id;
+}
+
+int add_file_texture_to_image(const char *fname, unsigned char *texture_sheet, int *cur_texture) {
+  add_file_texture_to_image_sub_opacity(fname, texture_sheet, cur_texture, 0);
+}
+
+int add_texture(cJSON *textures, const char *name, unsigned char *texture_sheet, int *cur_texture) {
+  char fname[1000];
+  cJSON *texture = cJSON_GetObjectItemCaseSensitive(textures, name);
+  if (texture == NULL) {
+    return 0;
+  }
+  char *texture_name = texture->valuestring;
+  if (strncmp(texture_name, "minecraft:", 10) == 0) {
+    texture_name += 10;
+  }
+  snprintf(fname, 1000, "data/assets/minecraft/textures/%s.png", texture_name);
+  add_file_texture_to_image(fname, texture_sheet, cur_texture);
 }
 
 void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char *username) {
@@ -742,6 +817,7 @@ void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char 
   mcapi_set_synchronize_player_position_cb(conn, on_position);
   mcapi_set_registry_data_cb(conn, on_registry);
   mcapi_set_update_time_cb(conn, on_update_time);
+  mcapi_set_set_block_destroy_stage_cb(conn, on_set_block_destroy_stage);
 }
 
 void chunk_renderer_init() {
@@ -1038,6 +1114,77 @@ void chunk_renderer_init() {
       },
     }
   );
+
+  game.render_pipeline_transparent = wgpuDeviceCreateRenderPipeline(
+    game.device,
+    &(const WGPURenderPipelineDescriptor){
+      .label = "game.render_pipeline",
+      .layout = game.pipeline_layout,
+      .vertex = (const WGPUVertexState){
+        .module = game.shader_module,
+        .entryPoint = "vs_main",
+        .bufferCount = 1,
+        .buffers = (const WGPUVertexBufferLayout[]){
+          (const WGPUVertexBufferLayout){
+            .arrayStride = FLOATS_PER_VERTEX * sizeof(float),
+            .stepMode = WGPUVertexStepMode_Vertex,
+            .attributeCount = sizeof(vertex_attributes) /
+                              sizeof(vertex_attributes[0]),
+            .attributes = vertex_attributes,
+          },
+        },
+      },
+      .fragment = &(const WGPUFragmentState){
+        .module = game.shader_module,
+        .entryPoint = "fs_destroy_main",
+        .targetCount = 1,
+        .targets = (const WGPUColorTargetState[]){
+          (const WGPUColorTargetState){
+            .format = game.surface_capabilities.formats[0],
+            .writeMask = WGPUColorWriteMask_All,
+            .blend = (WGPUBlendState[]){
+              (WGPUBlendState){
+                .color = (WGPUBlendComponent){
+                  .srcFactor = WGPUBlendFactor_Dst,
+                  .operation = WGPUBlendOperation_Add,
+                  .dstFactor = WGPUBlendFactor_OneMinusSrcAlpha,
+                },
+                .alpha = (WGPUBlendComponent){
+                  .srcFactor = WGPUBlendFactor_Zero,
+                  .operation = WGPUBlendOperation_Add,
+                  .dstFactor = WGPUBlendFactor_One,
+                },
+              },
+            },
+          },
+        },
+      },
+      .primitive = (const WGPUPrimitiveState){
+        .topology = WGPUPrimitiveTopology_TriangleList,
+      },
+      .multisample = (const WGPUMultisampleState){
+        .count = 1,
+        .mask = 0xFFFFFFFF,
+      },
+      .depthStencil = &(WGPUDepthStencilState){
+        .depthWriteEnabled = true,
+        .depthCompare = WGPUCompareFunction_LessEqual,
+        .format = WGPUTextureFormat_Depth24Plus,
+        .stencilBack = (WGPUStencilFaceState){
+          .compare = WGPUCompareFunction_Always,
+          .failOp = WGPUStencilOperation_Replace,
+          .depthFailOp = WGPUStencilOperation_Replace,
+          .passOp = WGPUStencilOperation_Replace,
+        },
+        .stencilFront = (WGPUStencilFaceState){
+          .compare = WGPUCompareFunction_Always,
+          .failOp = WGPUStencilOperation_Replace,
+          .depthFailOp = WGPUStencilOperation_Replace,
+          .passOp = WGPUStencilOperation_Replace,
+        },
+      },
+    }
+  );
   assert(game.render_pipeline);
 
   game.config = (const WGPUSurfaceConfiguration){
@@ -1115,6 +1262,11 @@ void chunk_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
       wgpuRenderPassEncoderDrawIndexed(render_pass_encoder, chunk->sections[s].num_quads * 6, 1, 0, 0, 0);
     }
   }
+
+  // Draw blocks breaking
+  wgpuRenderPassEncoderSetPipeline(render_pass_encoder, game.render_pipeline_transparent);
+  wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, game.block_overlay_vertex_buffer, 0, WGPU_WHOLE_SIZE);
+  wgpuRenderPassEncoderDrawIndexed(render_pass_encoder, game.number_of_blocks_being_broken * 6 * 6, 1, 0, 0, 0);
 }
 
 void sky_renderer_init() {
@@ -1306,7 +1458,7 @@ void block_selected_renderer_init() {
   );
   printf("selected uniform buffer %p\n", game.block_selected_renderer.uniform_buffer);
 
-  float vertices[18*4*6];
+  float vertices[18 * 4 * 6];
 
   int i = 0;
   float s = 0.01;
@@ -1326,7 +1478,7 @@ void block_selected_renderer_init() {
           vertices[i + d2] = p2 == 1 ? p2 - s : s;
           i += 3;
           vertices[i + d] = p;
-          vertices[i + d1] = 1-p1;
+          vertices[i + d1] = 1 - p1;
           vertices[i + d2] = p2 == 1 ? p2 - s : s;
           i += 3;
           vertices[i + d] = p;
@@ -1334,11 +1486,11 @@ void block_selected_renderer_init() {
           vertices[i + d2] = p2;
           i += 3;
           vertices[i + d] = p;
-          vertices[i + d1] = 1-p1;
+          vertices[i + d1] = 1 - p1;
           vertices[i + d2] = p2 == 1 ? p2 - s : s;
           i += 3;
           vertices[i + d] = p;
-          vertices[i + d1] = 1-p1;
+          vertices[i + d1] = 1 - p1;
           vertices[i + d2] = p2;
           i += 3;
         }
@@ -1501,7 +1653,7 @@ void block_selected_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
   wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, game.block_selected_renderer.bind_group, 0, NULL);
   wgpuRenderPassEncoderSetPipeline(render_pass_encoder, game.block_selected_renderer.render_pipeline);
   wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, game.block_selected_renderer.vertex_buffer, 0, WGPU_WHOLE_SIZE);
-  wgpuRenderPassEncoderDraw(render_pass_encoder, 18*4*2, 1, 0, 0);
+  wgpuRenderPassEncoderDraw(render_pass_encoder, 18 * 4 * 2, 1, 0, 0);
 }
 
 void load_block_models() {
@@ -1598,16 +1750,16 @@ void load_block_models() {
     }
     cJSON *textures = cJSON_GetObjectItemCaseSensitive(model, "textures");
 
-    info.texture = add_texture(textures, "texture", game.texture_sheet, &cur_texture);
-    info.texture_bottom = add_texture(textures, "bottom", game.texture_sheet, &cur_texture);
-    info.texture_top = add_texture(textures, "top", game.texture_sheet, &cur_texture);
-    info.texture_end = add_texture(textures, "end", game.texture_sheet, &cur_texture);
-    info.texture_side = add_texture(textures, "side", game.texture_sheet, &cur_texture);
-    info.texture_overlay = add_texture(textures, "overlay", game.texture_sheet, &cur_texture);
-    info.texture_all = add_texture(textures, "all", game.texture_sheet, &cur_texture);
-    info.texture_cross = add_texture(textures, "cross", game.texture_sheet, &cur_texture);
-    info.texture_layer0 = add_texture(textures, "layer0", game.texture_sheet, &cur_texture);
-    info.texture_vine = add_texture(textures, "vine", game.texture_sheet, &cur_texture);
+    info.texture = add_texture(textures, "texture", game.texture_sheet, &game.next_texture_loc);
+    info.texture_bottom = add_texture(textures, "bottom", game.texture_sheet, &game.next_texture_loc);
+    info.texture_top = add_texture(textures, "top", game.texture_sheet, &game.next_texture_loc);
+    info.texture_end = add_texture(textures, "end", game.texture_sheet, &game.next_texture_loc);
+    info.texture_side = add_texture(textures, "side", game.texture_sheet, &game.next_texture_loc);
+    info.texture_overlay = add_texture(textures, "overlay", game.texture_sheet, &game.next_texture_loc);
+    info.texture_all = add_texture(textures, "all", game.texture_sheet, &game.next_texture_loc);
+    info.texture_cross = add_texture(textures, "cross", game.texture_sheet, &game.next_texture_loc);
+    info.texture_layer0 = add_texture(textures, "layer0", game.texture_sheet, &game.next_texture_loc);
+    info.texture_vine = add_texture(textures, "vine", game.texture_sheet, &game.next_texture_loc);
 
     cJSON *states = cJSON_GetObjectItemCaseSensitive(block, "states");
     if (states != NULL) {
@@ -1628,7 +1780,6 @@ void load_block_models() {
     cJSON_Delete(model);
     block = block->next;
   }
-  // save_image("texture_sheet.png", texture_sheet, TEXTURE_SIZE * TEXTURE_TILES, TEXTURE_SIZE * TEXTURE_TILES);
 }
 
 void init_glfw() {
@@ -1777,6 +1928,99 @@ void init_surface() {
   };
 }
 
+void generate_block_breaking_mesh() {
+  int q = 0;
+  float *quads = game.block_overlay_buffer;
+  for (int block = 0; block < game.number_of_blocks_being_broken; block++) {
+    float s = 0.0005;
+    vec3 pos;
+    pos[0] = game.blocks_being_broken[block].position[0];
+    pos[1] = game.blocks_being_broken[block].position[1];
+    pos[2] = game.blocks_being_broken[block].position[2];
+    int texture = game.destroy_stage_textures[game.blocks_being_broken[block].stage];
+    printf("Blocks being broken stage %d, texture %d\n", game.blocks_being_broken[block].stage, texture);
+
+    for (int d = 0; d <= 2; d++) {
+      int d1 = (d + 1) % 3;
+      int d2 = (d + 2) % 3;
+      float du[3] = {0};
+      du[d1] = 1;
+      float dv[3] = {0};
+      dv[d2] = 1;
+      for (int p = 0; p <= 1; p++) {
+        float dd[3] = {0};
+        memset(dd, 0, 3 * sizeof(float));
+        dd[d] = p;
+
+        int normal = (p == 1 ? 1 : -1) * (d + 1);
+        quads[q + 0] = pos[0] + (dd[0] == 0 ? -s : 1 + s);
+        quads[q + 1] = pos[1] + (dd[1] == 0 ? -s : 1 + s);
+        quads[q + 2] = pos[2] + (dd[2] == 0 ? -s : 1 + s);
+        quads[q + 3] = 1;
+        quads[q + 4] = 1;
+        quads[q + 5] = 1;
+        quads[q + 6] = 1;
+        quads[q + 7] = 1;
+        quads[q + 8] = 1;
+        quads[q + 9] = texture;
+        quads[q + 10] = 0;  // overlay tile
+        quads[q + 11] = 1;  // sky light
+        quads[q + 12] = 1;  // block light
+        quads[q + 13] = normal;
+        q += FLOATS_PER_VERTEX;
+
+        quads[q + 0] = pos[0] + (du[0] + dd[0] == 0 ? -s : 1 + s);
+        quads[q + 1] = pos[1] + (du[1] + dd[1] == 0 ? -s : 1 + s);
+        quads[q + 2] = pos[2] + (du[2] + dd[2] == 0 ? -s : 1 + s);
+        quads[q + 3] = 1;
+        quads[q + 4] = 1;
+        quads[q + 5] = 1;
+        quads[q + 6] = 1;
+        quads[q + 7] = 0;
+        quads[q + 8] = 1;
+        quads[q + 9] = texture;
+        quads[q + 10] = 0;  // overlay tile
+        quads[q + 11] = 1;  // sky light
+        quads[q + 12] = 1;  // block light
+        quads[q + 13] = normal;
+
+        q += FLOATS_PER_VERTEX;
+        quads[q + 0] = pos[0] + (du[0] + dv[0] + dd[0] == 0 ? -s : 1 + s);
+        quads[q + 1] = pos[1] + (du[1] + dv[1] + dd[1] == 0 ? -s : 1 + s);
+        quads[q + 2] = pos[2] + (du[2] + dv[2] + dd[2] == 0 ? -s : 1 + s);
+        quads[q + 3] = 1;
+        quads[q + 4] = 1;
+        quads[q + 5] = 1;
+        quads[q + 6] = 1;
+        quads[q + 7] = 0;
+        quads[q + 8] = 0;
+        quads[q + 9] = texture;
+        quads[q + 10] = 0;  // overlay tile
+        quads[q + 11] = 1;  // sky light
+        quads[q + 12] = 1;  // block light
+        quads[q + 13] = normal;
+        q += FLOATS_PER_VERTEX;
+
+        quads[q + 0] = pos[0] + (dv[0] + dd[0] == 0 ? -s : 1 + s);
+        quads[q + 1] = pos[1] + (dv[1] + dd[1] == 0 ? -s : 1 + s);
+        quads[q + 2] = pos[2] + (dv[2] + dd[2] == 0 ? -s : 1 + s);
+        quads[q + 3] = 1;
+        quads[q + 4] = 1;
+        quads[q + 5] = 1;
+        quads[q + 6] = 1;
+        quads[q + 7] = 1;
+        quads[q + 8] = 0;
+        quads[q + 9] = texture;
+        quads[q + 10] = 0;  // overlay tile
+        quads[q + 11] = 1;  // sky light
+        quads[q + 12] = 1;  // block light
+        quads[q + 13] = normal;
+        q += FLOATS_PER_VERTEX;
+      }
+    }
+  }
+}
+
 int main(int argc, char *argv[]) {
   if (argc < 6) {
     perror("Usage: cmc [username] [server ip] [port] [uuid] [access_token]\n");
@@ -1796,6 +2040,13 @@ int main(int argc, char *argv[]) {
 
   unsigned short port = _port;
 
+  // Init block overlay renderer
+  char fname[100];
+  for (int i = 0; i < 10; i++) {
+    snprintf(fname, 100, "data/assets/minecraft/textures/block/destroy_stage_%d.png", i);
+    game.destroy_stage_textures[i] = add_file_texture_to_image_sub_opacity(fname, game.texture_sheet, &game.next_texture_loc, 64);
+  }
+
   init_mcapi(server_ip, port, uuid, access_token, username);
   frmwrk_setup_logging(WGPULogLevel_Warn);
   load_block_models();
@@ -1805,7 +2056,17 @@ int main(int argc, char *argv[]) {
   chunk_renderer_init();
   sky_renderer_init();
 
-  // Init block overlay renderer
+  game.block_overlay_vertex_buffer = frmwrk_device_create_buffer_init(
+    game.device,
+    &(const frmwrk_buffer_init_descriptor){
+      .label = "Block Overlay Vertex Buffer",
+      .content = (void *)game.block_overlay_buffer,
+      .content_size = sizeof(game.block_overlay_buffer),
+      .usage = WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst,
+    }
+  );
+
+  save_image("texture_sheet.png", game.texture_sheet, TEXTURE_SIZE * TEXTURE_TILES, TEXTURE_SIZE * TEXTURE_TILES);
 
   int width, height;
   glfwGetWindowSize(game.window, &width, &height);
@@ -1836,6 +2097,56 @@ int main(int argc, char *argv[]) {
       continue;
     }
     game.last_render_time = game.current_time;
+
+    // Update block destruction
+
+    float block_destruction_time = 5 * 0.5;
+
+    if (game.block_breaking_start != 0 && game.current_time - game.block_breaking_start > block_destruction_time) {
+      vec3 pos;
+      pos[0] = game.block_breaking_position[0];
+      pos[1] = game.block_breaking_position[1];
+      pos[2] = game.block_breaking_position[2];
+      world_set_block(&game.world, pos, 0, game.block_info, game.biome_info, game.device);
+      mcapi_send_player_action(game.conn, (mcapiPlayerActionPacket){
+                                            .face = game.block_breaking_face,
+                                            .position = {game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2]},
+                                            .status = MCAPI_ACTION_DIG_FINISH,
+                                            .sequence_num = game.block_breaking_seq_num,
+                                          });
+      printf("Sending block broken face=%d, x=%d, y=%d, z=%d, seq=%d\n", game.block_breaking_face, game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2], game.block_breaking_seq_num);
+      game.block_breaking_start = 0;
+    }
+
+    // Calculate block breaking stage
+    bool changed = false;
+
+    if (game.block_breaking_start != 0) {
+      if (game.number_of_blocks_being_broken == 0) {
+        game.number_of_blocks_being_broken = 1;
+        game.blocks_being_broken[0].position[0] = game.block_breaking_position[0];
+        game.blocks_being_broken[0].position[1] = game.block_breaking_position[1];
+        game.blocks_being_broken[0].position[2] = game.block_breaking_position[2];
+        changed = true;
+      }
+
+      int new_stage = (game.current_time - game.block_breaking_start) / block_destruction_time * 10;
+
+      if (game.blocks_being_broken[0].stage != new_stage) {
+        game.blocks_being_broken[0].stage = new_stage;
+        changed = true;
+      }
+    } else {
+      if (game.number_of_blocks_being_broken != 0) {
+        game.number_of_blocks_being_broken = 0;
+      }
+    }
+
+    // Generate block breaking mesh
+    if (changed) {
+      generate_block_breaking_mesh();
+      wgpuQueueWriteBuffer(game.queue, game.block_overlay_vertex_buffer, 0, &game.block_overlay_buffer, sizeof(game.block_overlay_buffer));
+    }
 
     WGPUSurfaceTexture surface_texture;
     wgpuSurfaceGetCurrentTexture(game.surface, &surface_texture);

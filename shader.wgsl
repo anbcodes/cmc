@@ -82,3 +82,24 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
   color = vec4<f32>(color.rgb * normal_multipliers[u32(vertex.normal + 3.0f)] * clamp(pow(clamp(internal_sky_light, 0.0, 1.0), 3.0) + 0.1, 0.0, 1.0), color.a);
   return color;
 }
+
+@fragment
+fn fs_destroy_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
+  var patchCount = vec2<f32>(TEXTURE_TILES, TEXTURE_TILES);
+  var patchSize = vec2(1.0 / patchCount.x, 1.0 / patchCount.y);
+  var texCoord = vertex.patchCoord + fract(vertex.coord) * patchSize;
+  var color = textureSample(image_texture, image_sampler, texCoord);
+  var tint = srgb_to_linear(vertex.color);
+  if (vertex.patchOverlayCoord.x == 0.0f && vertex.patchOverlayCoord.y == 0.0f) {
+    color *= tint;
+  }
+  var overlayColor = textureSample(image_texture, image_sampler, vertex.patchOverlayCoord + fract(vertex.coord) * patchSize) * tint;
+  color = mix(color, overlayColor, overlayColor.a);
+  if (color.a == 0.0f) {
+    discard;
+  }
+
+  var internal_sky_light = uniforms.internal_sky_max - (1.0 - vertex.sky_light);
+  color = vec4<f32>(color.rgb * clamp(pow(clamp(internal_sky_light, 0.0, 1.0), 3.0) + 0.1, 0.0, 1.0), color.a);
+  return color;
+}

@@ -137,7 +137,7 @@ typedef struct mcapiSetBlockDestroyStagePacket {
   int8_t stage;  // 0–9 to set it, any other value to remove it.
 } mcapiSetBlockDestroyStagePacket;
 
-void mcapi_set_block_destroy_stage_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiSetBlockDestroyStagePacket));
+void mcapi_set_set_block_destroy_stage_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiSetBlockDestroyStagePacket));
 
 typedef struct mcapiClientboundKnownPacksPacket {
   int known_pack_count;
