@@ -89,7 +89,7 @@ typedef enum PacketType {
   BLOCK_UPDATE = 0x09,                         // Unimplemented
   BOSS_BAR = 0x0a,                             // Unimplemented
   CLIENTBOUND_CHANGE_DIFFICULTY = 0x0b,        // Unimplemented
-  CHUNK_BATCH_FINISHED = 0x0c,                 // Unimplemented
+  CHUNK_BATCH_FINISHED = 0x0c,
   CHUNK_BATCH_START = 0x0d,                    // Unimplemented
   CHUNK_BATCH_BIOMES = 0x0e,                   // Unimplemented
   CLEAR_TITLES = 0x0f,                         // Unimplemented
@@ -210,7 +210,7 @@ typedef enum PacketType {
   SIGNED_CHAT_COMMAND = 0x05,               // Unimplemented
   CHAT_MESSAGE = 0x06,                      // Unimplemented
   PLAYER_SESSION = 0x07,                    // Unimplemented
-  CHUNK_BATCH_RECEIVED = 0x08,              // Unimplemented
+  CHUNK_BATCH_RECEIVED = 0x08,
   CLIENT_STATUS = 0x09,                     // Unimplemented
   PLAY_CLIENT_INFORMATION = 0x0a,           // Unimplemented
   COMMAND_SUGGESTION_REQUEST = 0x0b,        // Unimplemented
@@ -304,13 +304,14 @@ struct mcapiConnection {
   void (*set_block_destroy_stage_cb)(mcapiConnection *, mcapiSetBlockDestroyStagePacket);
   void (*clientbound_known_packs_cb)(mcapiConnection *, mcapiClientboundKnownPacksPacket);
   void (*registry_data_cb)(mcapiConnection *, mcapiRegistryDataPacket);
+
+  // Play
   void (*chunk_and_light_data_cb)(mcapiConnection *, mcapiChunkAndLightDataPacket);
   void (*update_light_cb)(mcapiConnection *, mcapiUpdateLightPacket);
   void (*synchronize_player_position_cb)(mcapiConnection *, mcapiSynchronizePlayerPositionPacket);
   void (*update_time_cb)(mcapiConnection *, mcapiUpdateTimePacket);
   void (*block_update_cb)(mcapiConnection *, mcapiBlockUpdatePacket);
-
-  // Play
+  void (*chunk_batch_finished_cb)(mcapiConnection *, mcapiChunkBatchFinishedPacket);
 };
 
 mcapiConnection *mcapi_create_connection(char *hostname, short port, char *uuid, char *access_token) {
@@ -393,7 +394,7 @@ void mcapi_destroy_connection(mcapiConnection *conn) {
 
 void mcapi_set_state(mcapiConnection *conn, mcapiConnState state) {
   conn->state = state;
-};
+}
 
 mcapiConnState mcapi_get_state(mcapiConnection *conn) {
   return conn->state;
@@ -564,7 +565,17 @@ void mcapi_send_player_action(mcapiConnection *conn, mcapiPlayerActionPacket pac
   write_varint(&reusable_buffer, packet.sequence_num);
 
   send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
-};
+}
+
+void mcapi_send_chunk_batch_received(mcapiConnection* conn, mcapiChunkBatchReceivedPacket packet) {
+  reusable_buffer.cursor = 0;
+  reusable_buffer.buf.len = 0;
+
+  write_varint(&reusable_buffer, CHUNK_BATCH_RECEIVED);
+  write_float(&reusable_buffer, packet.chunks_per_tick);
+
+  send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
+}
 
 // Reading packets
 
@@ -648,7 +659,7 @@ mcapiClientboundKnownPacksPacket create_clientbound_known_packs_packet(ReadableB
   }
 
   return res;
-};
+}
 
 void destroy_clientbound_known_packs_packet(mcapiClientboundKnownPacksPacket p) {
   // for (int i = 0; i < p.known_pack_count; i++) {
@@ -673,7 +684,7 @@ mcapiRegistryDataPacket create_registry_data_packet(ReadableBuffer *p) {
     }
   }
   return res;
-};
+}
 
 void destroy_registry_data_packet(mcapiRegistryDataPacket p) {
   for (int i = 0; i < p.entry_count; i++) {
@@ -739,6 +750,7 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
   mcapiChunkAndLightDataPacket res = {};
   res.chunk_x = read_int(p);
   res.chunk_z = read_int(p);
+  printf("Chunk x=%d z=%d\n", res.chunk_x, res.chunk_z);
   res.heightmaps = read_nbt(p);
   int data_len = read_varint(p);
 
@@ -848,6 +860,14 @@ mcapiUpdateLightPacket read_update_light_packet(ReadableBuffer *p) {
   return res;
 }
 
+mcapiChunkBatchFinishedPacket read_chunk_batch_finished_packet(ReadableBuffer *p) {
+  mcapiChunkBatchFinishedPacket res = {};
+
+  res.batch_size = read_varint(p);
+
+  return res;
+}
+
 mcapiSynchronizePlayerPositionPacket create_synchronize_player_position_data_packet(ReadableBuffer *p) {
   mcapiSynchronizePlayerPositionPacket res = {};
   res.x = read_double(p);
@@ -894,6 +914,7 @@ mcapi_setcb_func(update_light, mcapiUpdateLightPacket);
 mcapi_setcb_func(block_update, mcapiBlockUpdatePacket);
 mcapi_setcb_func(synchronize_player_position, mcapiSynchronizePlayerPositionPacket);
 mcapi_setcb_func(update_time, mcapiUpdateTimePacket);
+mcapi_setcb_func(chunk_batch_finished, mcapiChunkBatchFinishedPacket);
 
 void enable_encryption(mcapiConnection *conn, EncryptionRequestPacket encrypt_req) {
   Buffer shared_secret = create_buffer(16);
@@ -1151,6 +1172,10 @@ void mcapi_poll(mcapiConnection *conn) {
               mcapiChunkAndLightDataPacket chunk_packet = create_chunk_and_light_data_packet(&curr_packet);
               if (conn->chunk_and_light_data_cb) (*conn->chunk_and_light_data_cb)(conn, chunk_packet);
               destroy_chunk_and_light_data_packet(chunk_packet);
+              break;
+            case CHUNK_BATCH_FINISHED:
+              mcapiChunkBatchFinishedPacket cbf_packet = read_chunk_batch_finished_packet(&curr_packet);
+              if (conn->chunk_batch_finished_cb) (*conn->chunk_batch_finished_cb)(conn, cbf_packet);
               break;
             case UPDATE_LIGHT:
               mcapiUpdateLightPacket light_packet = read_update_light_packet(&curr_packet);

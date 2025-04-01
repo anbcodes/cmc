@@ -763,6 +763,11 @@ void on_set_block_destroy_stage(mcapiConnection *conn, mcapiSetBlockDestroyStage
   printf("Destroy stage %d\n", packet.stage);
 }
 
+void on_chunk_batch_finished(mcapiConnection *conn, mcapiChunkBatchFinishedPacket packet) {
+  printf("Chunk batch finished chunks=%d\n", packet.batch_size);
+  mcapi_send_chunk_batch_received(conn, (mcapiChunkBatchReceivedPacket) { .chunks_per_tick = 0.1 });
+}
+
 int add_file_texture_to_image_sub_opacity(const char *fname, unsigned char *texture_sheet, int *cur_texture, int sub_opacity) {
   unsigned int width, height;
   unsigned char *rgba = load_image(fname, &width, &height);
@@ -851,6 +856,7 @@ void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char 
   mcapi_set_registry_data_cb(conn, on_registry);
   mcapi_set_update_time_cb(conn, on_update_time);
   mcapi_set_set_block_destroy_stage_cb(conn, on_set_block_destroy_stage);
+  mcapi_set_chunk_batch_finished_cb(conn, on_chunk_batch_finished);
 }
 
 void chunk_renderer_init() {

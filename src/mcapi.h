@@ -108,6 +108,13 @@ typedef struct mcapiPlayerActionPacket {
 // Sent when the player mines a block. A Notchian server only accepts digging packets with coordinates within a 6-unit radius between the center of the block and the player's eyes.
 void mcapi_send_player_action(mcapiConnection* conn, mcapiPlayerActionPacket packet);
 
+
+typedef struct mcapiChunkBatchReceivedPacket {
+  float chunks_per_tick;   // Desired chunks per tick
+} mcapiChunkBatchReceivedPacket;
+
+void mcapi_send_chunk_batch_received(mcapiConnection* conn, mcapiChunkBatchReceivedPacket packet);
+
 // -- Callbacks --
 
 typedef struct mcapiLoginSuccessProperty {
@@ -198,6 +205,12 @@ typedef struct mcapiBlockUpdatePacket {
 } mcapiBlockUpdatePacket;
 
 void mcapi_set_block_update_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiBlockUpdatePacket));
+
+typedef struct mcapiChunkBatchFinishedPacket {
+  int batch_size;  // The number of chunks in the batch
+} mcapiChunkBatchFinishedPacket;
+
+void mcapi_set_chunk_batch_finished_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiChunkBatchFinishedPacket));
 
 typedef struct mcapiSynchronizePlayerPositionPacket {
   double x;
