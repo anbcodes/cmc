@@ -10,6 +10,7 @@
 #include "datatypes.h"
 #include "framework.h"
 #include "lodepng/lodepng.h"
+#include "macros.h"
 #include "mcapi.h"
 #include "nbt.h"
 #include "wgpu.h"
@@ -768,6 +769,11 @@ void on_chunk_batch_finished(mcapiConnection *conn, mcapiChunkBatchFinishedPacke
   mcapi_send_chunk_batch_received(conn, (mcapiChunkBatchReceivedPacket) { .chunks_per_tick = 0.1 });
 }
 
+void on_clientbound_keepalive(mcapiConnection *conn, mcapiClientboundKeepAlivePacket packet) {
+  DEBUG("Got keepalive id=%ld, sending!\n", packet.keep_alive_id);
+  mcapi_send_serverbound_keepalive(conn, (mcapiServerboundKeepalivePacket) {.id = packet.keep_alive_id});
+}
+
 int add_file_texture_to_image_sub_opacity(const char *fname, unsigned char *texture_sheet, int *cur_texture, int sub_opacity) {
   unsigned int width, height;
   unsigned char *rgba = load_image(fname, &width, &height);
@@ -857,6 +863,7 @@ void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char 
   mcapi_set_update_time_cb(conn, on_update_time);
   mcapi_set_set_block_destroy_stage_cb(conn, on_set_block_destroy_stage);
   mcapi_set_chunk_batch_finished_cb(conn, on_chunk_batch_finished);
+  mcapi_set_clientbound_keepalive_cb(conn, on_clientbound_keepalive);
 }
 
 void chunk_renderer_init() {
@@ -2144,6 +2151,7 @@ void tick() {
 }
 
 int main(int argc, char *argv[]) {
+  DEBUG("Starting...\n");
   if (argc < 6) {
     perror("Usage: cmc [username] [server ip] [port] [uuid] [access_token]\n");
     exit(1);

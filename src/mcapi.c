@@ -17,6 +17,7 @@
 #include "cglm/cglm.h"
 #include "datatypes.h"
 #include "libdeflate.h"
+#include "macros.h"
 #include "nbt.h"
 #include "protocol.h"
 #include "sockets.h"
@@ -235,7 +236,7 @@ typedef enum PacketType {
   SERVERBOUND_MOVE_VEHICLE = 0x1e,          // Unimplemented
   PADDLE_BOAT = 0x1f,                       // Unimplemented
   PICK_ITEM = 0x20,                         // Unimplemented
-  PLAY_PING_REQUEST = 0x21,                 // Unimplemented
+  PLAY_PING_REQUEST = 0x21,
   PLACE_RECIPE = 0x22,                      // Unimplemented
   SERVERBOUND_PLAYER_ABILITIES = 0x23,      // Unimplemented
   PLAYER_ACTION = 0x24,                     // Unimplemented
@@ -312,6 +313,7 @@ struct mcapiConnection {
   void (*update_time_cb)(mcapiConnection *, mcapiUpdateTimePacket);
   void (*block_update_cb)(mcapiConnection *, mcapiBlockUpdatePacket);
   void (*chunk_batch_finished_cb)(mcapiConnection *, mcapiChunkBatchFinishedPacket);
+  void (*clientbound_keepalive_cb)(mcapiConnection *, mcapiClientboundKeepAlivePacket);
 };
 
 mcapiConnection *mcapi_create_connection(char *hostname, short port, char *uuid, char *access_token) {
@@ -577,7 +579,37 @@ void mcapi_send_chunk_batch_received(mcapiConnection* conn, mcapiChunkBatchRecei
   send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
 }
 
-// Reading packets
+void mcapi_send_play_pong(mcapiConnection *conn, mcapiPlayPongPacket packet) {
+  reusable_buffer.cursor = 0;
+  reusable_buffer.buf.len = 0;
+
+  write_varint(&reusable_buffer, PLAY_PONG);
+  write_int(&reusable_buffer, packet.id);
+
+  send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
+}
+
+void mcapi_send_play_ping_request(mcapiConnection *conn, mcapiPingRequestPacket packet) {
+  DEBUG("Sending play ping request %ld\n", packet.id);
+  reusable_buffer.cursor = 0;
+  reusable_buffer.buf.len = 0;
+
+  write_varint(&reusable_buffer, PLAY_PING_REQUEST);
+  write_long(&reusable_buffer, packet.id);
+
+  send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
+}
+
+void mcapi_send_serverbound_keepalive(mcapiConnection* conn, mcapiServerboundKeepalivePacket packet) {
+  reusable_buffer.cursor = 0;
+  reusable_buffer.buf.len = 0;
+
+  write_varint(&reusable_buffer, PLAY_SERVERBOUND_KEEP_ALIVE);
+  write_long(&reusable_buffer, packet.id);
+
+  send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
+}
+// ======= Reading packets =========
 
 // Enables compression. If compression is enabled, all following packets are encoded in the
 // compressed packet format. Negative values will disable compression, meaning the packet format
@@ -894,6 +926,12 @@ mcapiBlockUpdatePacket read_block_update_packet(ReadableBuffer *p) {
   return res;
 }
 
+mcapiClientboundKeepAlivePacket read_clientbound_keepalive_packet(ReadableBuffer *p) {
+  mcapiClientboundKeepAlivePacket res = {};
+  res.keep_alive_id = read_long(p);
+  return res;
+}
+
 #define mcapi_setcb_func(name, packet)                                                       \
   void mcapi_set_##name##_cb(mcapiConnection *conn, void (*cb)(mcapiConnection *, packet)) { \
     conn->name##_cb = cb;                                                                    \
@@ -904,17 +942,18 @@ mcapiBlockUpdatePacket read_block_update_packet(ReadableBuffer *p) {
     conn->name##_cb = cb;                                                            \
   }
 
-mcapi_setcb_func(login_success, mcapiLoginSuccessPacket);
-mcapi_setcb_func1(finish_config);
-mcapi_setcb_func(set_block_destroy_stage, mcapiSetBlockDestroyStagePacket);
-mcapi_setcb_func(clientbound_known_packs, mcapiClientboundKnownPacksPacket);
-mcapi_setcb_func(registry_data, mcapiRegistryDataPacket);
-mcapi_setcb_func(chunk_and_light_data, mcapiChunkAndLightDataPacket);
-mcapi_setcb_func(update_light, mcapiUpdateLightPacket);
-mcapi_setcb_func(block_update, mcapiBlockUpdatePacket);
-mcapi_setcb_func(synchronize_player_position, mcapiSynchronizePlayerPositionPacket);
-mcapi_setcb_func(update_time, mcapiUpdateTimePacket);
-mcapi_setcb_func(chunk_batch_finished, mcapiChunkBatchFinishedPacket);
+mcapi_setcb_func(login_success, mcapiLoginSuccessPacket)
+mcapi_setcb_func1(finish_config)
+mcapi_setcb_func(set_block_destroy_stage, mcapiSetBlockDestroyStagePacket)
+mcapi_setcb_func(clientbound_known_packs, mcapiClientboundKnownPacksPacket)
+mcapi_setcb_func(registry_data, mcapiRegistryDataPacket)
+mcapi_setcb_func(chunk_and_light_data, mcapiChunkAndLightDataPacket)
+mcapi_setcb_func(update_light, mcapiUpdateLightPacket)
+mcapi_setcb_func(block_update, mcapiBlockUpdatePacket)
+mcapi_setcb_func(synchronize_player_position, mcapiSynchronizePlayerPositionPacket)
+mcapi_setcb_func(update_time, mcapiUpdateTimePacket)
+mcapi_setcb_func(chunk_batch_finished, mcapiChunkBatchFinishedPacket)
+mcapi_setcb_func(clientbound_keepalive, mcapiClientboundKeepAlivePacket)
 
 void enable_encryption(mcapiConnection *conn, EncryptionRequestPacket encrypt_req) {
   Buffer shared_secret = create_buffer(16);
@@ -1192,6 +1231,14 @@ void mcapi_poll(mcapiConnection *conn) {
             case UPDATE_TIME:
               mcapiUpdateTimePacket time_packet = create_update_time_packet(&curr_packet);
               if (conn->update_time_cb) (*conn->update_time_cb)(conn, time_packet);
+              break;
+            case CLIENTBOUND_KEEPALIVE:
+              mcapiClientboundKeepAlivePacket ka_packet = read_clientbound_keepalive_packet(&curr_packet);
+              if (conn->clientbound_keepalive_cb) (*conn->clientbound_keepalive_cb)(conn, ka_packet);
+              break;
+            case PLAY_PING_RESPONSE:
+              DEBUG("Got ping response!\n");
+              break;
             default:
               // printf("Unknown play packet %02x (len %ld)\n", type, curr_packet.buf.len);
               break;
