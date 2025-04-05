@@ -195,10 +195,16 @@ typedef struct mcapiChunkSection {
   int biomes[64];
 } mcapiChunkSection;
 
+typedef struct mcapiHeightmap {
+  int type;
+  int data[256];
+} mcapiHeightmap;
+
 typedef struct mcapiChunkAndLightDataPacket {
   int chunk_x;
   int chunk_z;
-  NBT* heightmaps;
+  int heightmap_count;
+  mcapiHeightmap *heightmaps;
   int chunk_section_count;
   mcapiChunkSection* chunk_sections;
   int block_entity_count;

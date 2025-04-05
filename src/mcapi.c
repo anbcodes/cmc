@@ -549,8 +549,21 @@ int calc_compressed_arr_len(int entries, int bits_per_entry) {
 mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *p) {
   mcapiChunkAndLightDataPacket res = {};
 
+  write_buffer_to_file(p->buf, "tmp.bin");
+
   res.chunk_x = read_int(p);
   res.chunk_z = read_int(p);
+
+  // Read the heightmap
+  res.heightmap_count = read_varint(p);
+  res.heightmaps = malloc(res.heightmap_count * sizeof(mcapiHeightmap));
+  for (int i = 0; i < res.heightmap_count; i++) {
+    // Likely the type but not sure
+    res.heightmaps[i].type = read_short(p);
+
+    int longarrlen = calc_compressed_arr_len(16*16, 9);
+    read_compressed_long_arr(p, 9, 16*16, longarrlen, res.heightmaps[i].data);
+  }
 
   // Jump to after the heightmap
   p->cursor = 0x388;
@@ -663,18 +676,20 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
   // Sky and block lights
   read_light_data_from_packet(p, res.block_light_array, res.sky_light_array);
 
-
-
   return res;
 }
 
 void destroy_chunk_and_light_data_packet(mcapiChunkAndLightDataPacket p) {
-  // destroy_nbt(p.heightmaps);
+  free(p.heightmaps);
+  p.heightmaps = NULL;
   free(p.chunk_sections);
+  p.chunk_sections = NULL;
   for (int i = 0; i < p.block_entity_count; i++) {
     destroy_nbt(p.block_entities[i].data);
+    p.block_entities[i].data = NULL;
   }
   free(p.block_entities);
+  p.block_entities = NULL;
 }
 
 mcapiUpdateLightPacket read_update_light_packet(ReadableBuffer *p) {
