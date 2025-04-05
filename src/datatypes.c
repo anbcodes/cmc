@@ -20,12 +20,23 @@ void destroy_buffer(const Buffer buffer) {
   free(buffer.ptr);
 }
 
-void print_buf(Buffer buf) {
+void print_buffer(Buffer buf) {
   for (int i = 0; i < buf.len; i++) {
     printf("%02x ", buf.ptr[i]);
   }
 
   printf("\n");
+}
+
+void write_buffer_to_file(Buffer buf, const char* filename) {
+  FILE *fptr;
+
+  // Open a file in writing mode
+  fptr = fopen(filename, "w");
+
+  fwrite(buf.ptr, buf.len, 1, fptr);
+
+  fclose(fptr);
 }
 
 String to_string(char *c_str) {

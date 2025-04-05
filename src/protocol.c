@@ -4,6 +4,7 @@
 
 #include "cglm/cglm.h"
 #include "datatypes.h"
+#include "macros.h"
 
 /* --- Packet Reader/Writer Code --- */
 
@@ -368,6 +369,8 @@ void read_ipos_into(ReadableBuffer *io, ivec3 pos) {
 
 void read_compressed_long_arr(ReadableBuffer *p, int bits_per_entry, int entries, int compressed_len, int to[]) {
   int ind = 0;
+  DEBUG("compressed_start p=%x\n", p->cursor);
+
   for (int i = 0; i < compressed_len; i++) {
     uint64_t cur = read_ulong(p);
     // printf("comlong i=%d, bpe=%d, total_entries=%d, curr_entry=%d\n", i, bits_per_entry, entries, ind);
@@ -377,6 +380,7 @@ void read_compressed_long_arr(ReadableBuffer *p, int bits_per_entry, int entries
       to[ind] = block;
       ind++;
       if (ind == entries) {
+        DEBUG("compressed finished i = %d, len = %d, p = %x\n", i, compressed_len, p->cursor);
         return;
       }
     }

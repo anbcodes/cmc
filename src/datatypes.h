@@ -33,6 +33,8 @@ typedef Buffer String;
 String to_string(char* c_str);
 void print_string(String str);
 
+void write_buffer_to_file(Buffer buf, const char* filename);
+
 typedef struct ReadableBuffer {
   Buffer buf;
   int cursor;  // Location of next read

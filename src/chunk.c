@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "framework.h"
+#include "macros.h"
 
 int positive_mod(int a, int b) {
   int result = a % b;
@@ -357,7 +358,8 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           int dv[3] = {0};
           dv[v] = h;
           int q = section->num_quads * 4 * FLOATS_PER_VERTEX;
-          BlockInfo info = block_info[abs(m.material)];
+
+          BlockInfo info = abs(m.material) > 65535 ? block_info[0] : block_info[abs(m.material)]; // Fails here!!!!
           int tile = info.texture;
           if (tile == 0) {
             tile = info.texture_all;
@@ -390,13 +392,13 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           int biome_index = section->biome_data[biome_x[0] + 4 * (biome_x[2] + 4 * biome_x[1])];
           // printf("Biome index: %d\n", biome_index);
           BiomeInfo biome = biome_info[biome_index];
-          if (block_info[abs(m.material)].grass) {
+          if (info.grass) {
             // Don't set the grass color for the bottom of the block
             if (!(d == 1 && m.material < 0)) {
               glm_vec3_copy(biome.grass_color, color);
             }
           }
-          if (block_info[abs(m.material)].foliage) {
+          if (info.foliage) {
             glm_vec3_copy(biome.foliage_color, color);
           }
 
@@ -481,6 +483,7 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
 
   if (section->vertex_buffer != NULL) {
     wgpuBufferRelease(section->vertex_buffer);
+    section->vertex_buffer = NULL;
   }
 
   section->vertex_buffer = frmwrk_device_create_buffer_init(

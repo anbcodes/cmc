@@ -220,6 +220,7 @@ static void handle_request_adapter(
   WGPUAdapter adapter, char const *message,
   void *userdata
 ) {
+  UNUSED(userdata)
   if (status == WGPURequestAdapterStatus_Success) {
     game.adapter = adapter;
   } else {
@@ -231,6 +232,7 @@ static void handle_request_device(
   WGPUDevice device, char const *message,
   void *userdata
 ) {
+  UNUSED(userdata)
   if (status == WGPURequestDeviceStatus_Success) {
     game.device = device;
   } else {
@@ -279,6 +281,7 @@ void update_window_size(int width, int height) {
 }
 
 static void handle_glfw_framebuffer_size(GLFWwindow *window, int width, int height) {
+  UNUSED(window)
   if (width == 0 && height == 0) {
     return;
   }
@@ -287,6 +290,7 @@ static void handle_glfw_framebuffer_size(GLFWwindow *window, int width, int heig
 }
 
 static void handle_glfw_cursor_pos(GLFWwindow *window, double xpos, double ypos) {
+  UNUSED(window)
   vec2 current = {xpos, ypos};
   if (!game.mouse_captured) {
     glm_vec2_copy(current, game.last_mouse);
@@ -552,7 +556,7 @@ void update_player_position(float dt) {
   glm_vec3_copy(game.position, game.last_position);
 
   game_update_player_y(delta[1]);
-  if (abs(delta[0]) > abs(delta[2])) {
+  if (fabs(delta[0]) > fabs(delta[2])) {
     game_update_player_x(delta[0]);
     game_update_player_z(delta[2]);
   } else {
@@ -604,6 +608,7 @@ void on_login_success(mcapiConnection *conn, mcapiLoginSuccessPacket packet) {
 }
 
 void on_known_packs(mcapiConnection *conn, mcapiClientboundKnownPacksPacket packet) {
+  UNUSED(packet)
   mcapi_send_serverbound_known_packs(conn, (mcapiServerboundKnownPacksPacket){});
 }
 
@@ -682,10 +687,11 @@ void on_finish_config(mcapiConnection *conn) {
 }
 
 void on_chunk(mcapiConnection *conn, mcapiChunkAndLightDataPacket packet) {
+  UNUSED(conn)
   Chunk *chunk = world_chunk(&game.world, packet.chunk_x, packet.chunk_z);
   bool is_new = false;
   if (chunk == NULL) {
-    chunk = malloc(sizeof(Chunk));
+    chunk = calloc(1, sizeof(Chunk));
     is_new = true;
   }
 
@@ -708,6 +714,7 @@ void on_chunk(mcapiConnection *conn, mcapiChunkAndLightDataPacket packet) {
 }
 
 void on_light(mcapiConnection *conn, mcapiUpdateLightPacket packet) {
+  UNUSED(conn)
   printf("Light updated!!! %d, %d\n", packet.chunk_x, packet.chunk_z);
   Chunk *chunk = world_chunk(&game.world, packet.chunk_x, packet.chunk_z);
   if (chunk == NULL) {
@@ -723,6 +730,7 @@ void on_light(mcapiConnection *conn, mcapiUpdateLightPacket packet) {
 }
 
 void on_block_update(mcapiConnection *conn, mcapiBlockUpdatePacket packet) {
+  UNUSED(conn)
   vec3 pos;
   pos[0] = packet.position[0];
   pos[1] = packet.position[1];
@@ -756,11 +764,13 @@ void on_position(mcapiConnection *conn, mcapiSynchronizePlayerPositionPacket pac
 }
 
 void on_update_time(mcapiConnection *conn, mcapiUpdateTimePacket packet) {
+  UNUSED(conn)
   printf("World age: %ld, Time of day: %ld\n", packet.world_age, packet.time_of_day % 24000);
   game.time_of_day = packet.time_of_day;
 }
 
 void on_set_block_destroy_stage(mcapiConnection *conn, mcapiSetBlockDestroyStagePacket packet) {
+  UNUSED(conn)
   printf("Destroy stage %d\n", packet.stage);
 }
 
@@ -791,8 +801,8 @@ int add_file_texture_to_image_sub_opacity(const char *fname, unsigned char *text
   int tile_start_y = (texture_id / TEXTURE_TILES) * TEXTURE_SIZE;
   width = glm_min(width, TEXTURE_SIZE);
   height = glm_min(height, TEXTURE_SIZE);
-  for (int y = 0; y < height; y++) {
-    for (int x = 0; x < width; x++) {
+  for (unsigned int y = 0; y < height; y++) {
+    for (unsigned int x = 0; x < width; x++) {
       int i = (y * width + x) * 4;
       int j = ((tile_start_y + y) * full_width + (tile_start_x + x)) * 4;
       // int j = (texture_id * TEXTURE_SIZE * TEXTURE_SIZE + y * TEXTURE_SIZE + x) * 4;
@@ -808,7 +818,7 @@ int add_file_texture_to_image_sub_opacity(const char *fname, unsigned char *text
 }
 
 int add_file_texture_to_image(const char *fname, unsigned char *texture_sheet, int *cur_texture) {
-  add_file_texture_to_image_sub_opacity(fname, texture_sheet, cur_texture, 0);
+  return add_file_texture_to_image_sub_opacity(fname, texture_sheet, cur_texture, 0);
 }
 
 int add_texture(cJSON *textures, const char *name, unsigned char *texture_sheet, int *cur_texture) {
@@ -822,7 +832,7 @@ int add_texture(cJSON *textures, const char *name, unsigned char *texture_sheet,
     texture_name += 10;
   }
   snprintf(fname, 1000, "data/assets/minecraft/textures/%s.png", texture_name);
-  add_file_texture_to_image(fname, texture_sheet, cur_texture);
+  return add_file_texture_to_image(fname, texture_sheet, cur_texture);
 }
 
 void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char *username) {
@@ -832,7 +842,9 @@ void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char 
   mcapi_send_handshake(
     conn,
     (mcapiHandshakePacket){
-      .protocol_version = 767,
+      .protocol_version = 770,
+      // .protocol_version = 767,
+      // .protocol_version = 769,
       .server_addr = server_ip,
       .server_port = port,
       .next_state = 2,
@@ -909,28 +921,28 @@ void chunk_renderer_init() {
       .addressModeW = WGPUAddressMode_Repeat,
       .magFilter = WGPUFilterMode_Nearest,
       .minFilter = WGPUFilterMode_Nearest,
-      .mipmapFilter = WGPUFilterMode_Nearest,
+      .mipmapFilter = WGPUMipmapFilterMode_Nearest,
       .maxAnisotropy = 1,
     }
   );
 
-  WGPUBuffer buffer = frmwrk_device_create_buffer_init(
-    game.device,
-    &(const frmwrk_buffer_init_descriptor){
-      .label = "Texture Buffer",
-      .content = (void *)game.texture_sheet,
-      .content_size = TEXTURE_SIZE * TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_TILES * 4,
-      .usage = WGPUBufferUsage_CopySrc,
-    }
-  );
+  // WGPUBuffer buffer = frmwrk_device_create_buffer_init(
+  //   game.device,
+  //   &(const frmwrk_buffer_init_descriptor){
+  //     .label = "Texture Buffer",
+  //     .content = (void *)game.texture_sheet,
+  //     .content_size = TEXTURE_SIZE * TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_TILES * 4,
+  //     .usage = WGPUBufferUsage_CopySrc,
+  //   }
+  // );
 
-  WGPUImageCopyBuffer image_copy_buffer = {
-    .buffer = buffer,
-    .layout = {
-      .bytesPerRow = TEXTURE_SIZE * TEXTURE_TILES * 4,
-      .rowsPerImage = TEXTURE_SIZE * TEXTURE_TILES,
-    },
-  };
+  // WGPUImageCopyBuffer image_copy_buffer = {
+  //   .buffer = buffer,
+  //   .layout = {
+  //     .bytesPerRow = TEXTURE_SIZE * TEXTURE_TILES * 4,
+  //     .rowsPerImage = TEXTURE_SIZE * TEXTURE_TILES,
+  //   },
+  // };
   WGPUImageCopyTexture image_copy_texture = {
     .texture = texture,
   };
@@ -1080,7 +1092,6 @@ void chunk_renderer_init() {
     indices[offset + 4] = base + 3;
     indices[offset + 5] = base + 0;
   }
-  int index_count = sizeof(indices) / sizeof(indices[0]);
 
   game.index_buffer = frmwrk_device_create_buffer_init(
     game.device,
@@ -1287,7 +1298,7 @@ void chunk_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
   }
 
   game.uniforms.internal_sky_max = sky_max / 15.0f;
-  float sky_color_scale = pow(glm_clamp((sky_max - 4.0) / 11.0, 0.0, 1.0), 3.0);
+  // float sky_color_scale = pow(glm_clamp((sky_max - 4.0) / 11.0, 0.0, 1.0), 3.0);
 
   wgpuQueueWriteBuffer(game.queue, game.uniform_buffer, 0, &game.uniforms, sizeof(game.uniforms));
 
@@ -1502,7 +1513,7 @@ void block_selected_renderer_init() {
       .usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst,
     }
   );
-  printf("selected uniform buffer %p\n", game.block_selected_renderer.uniform_buffer);
+  printf("selected uniform buffer %p\n", (void*)game.block_selected_renderer.uniform_buffer);
 
   float vertices[18 * 4 * 6];
 
@@ -1731,9 +1742,7 @@ void block_selected_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
 }
 
 void load_block_models() {
-  int num_id = 0;
   int max_id = -1;
-  int cur_texture = 1;
   char fname[1000];
   game.blocks = load_json("data/blocks.json");
   cJSON *block = game.blocks->child;
@@ -1842,7 +1851,6 @@ void load_block_models() {
         cJSON *state_id = cJSON_GetObjectItemCaseSensitive(state, "id");
         if (state_id != NULL && cJSON_IsNumber(state_id)) {
           int id = state_id->valueint;
-          num_id += 1;
           if (id > max_id) {
             max_id = id;
           }

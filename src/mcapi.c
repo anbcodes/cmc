@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
 #include "cglm/cglm.h"
 #include "datatypes.h"
@@ -21,248 +22,9 @@
 #include "nbt.h"
 #include "protocol.h"
 #include "sockets.h"
+#include "packetTypes.h"
 
 #define ntohll(x) (((uint64_t)ntohl((x) & 0xFFFFFFFF) << 32) | ntohl((x) >> 32))
-
-/* --- Enums --- */
-
-typedef enum PacketType {
-  // Init
-  HANDSHAKE = 0,
-  STATUS_REQUEST = 0,   // Unimplemented
-  STATUS_RESPONSE = 0,  // Unimplemented
-  PING_REQUEST = 1,     // Unimplemented
-  PING_RESPONSE = 1,    // Unimplemented
-  // Login
-  LOGIN_DISCONNECT = 0x00,    // Unimplemented
-  ENCRYPTION_REQUEST = 0x01,  // Unimplemented
-  LOGIN_SUCCESS = 0x02,
-  SET_COMPRESSION = 0x03,
-  LOGIN_PLUGIN_REQUEST = 0x04,  // Unimplemented
-  LOGIN_COOKIE_REQUEST = 0x05,  // Unimplemented
-
-  LOGIN_START = 0x00,
-  ENCRYPTION_RESPONSE = 0x01,    // Unimplemented
-  LOGIN_PLUGIN_RESPONSE = 0x02,  // Unimplemented
-  LOGIN_ACKNOWLEDGED = 0x03,
-  COOKIE_RESPONSE = 0x04,  // Unimplemented
-
-  // Config
-  // Clientbound
-  CONFIG_COOKIE_REQUEST = 0x00,       // Unimplemented
-  CLIENTBOUND_PLUGIN_MESSAGE = 0x01,  // Unimplemented
-  CONFIG_DISCONNECT = 0x02,           // Unimplemented
-  FINISH_CONFIG = 0x03,
-  CLIENTBOUND_CONFIG_KEEP_ALIVE = 0x04,  // Unimplemented
-  CONFIG_PING = 0x05,                    // Unimplemented
-  RESET_CHAT = 0x06,                     // Unimplemented
-  REGISTRY_DATA = 0x07,                  // Unimplemented
-  REMOVE_RESOURCE_PACK = 0x08,           // Unimplemented
-  ADD_RESOURCE_PACK = 0x09,              // Unimplemented
-  CONFIG_STORE_COOKIE = 0x0a,            // Unimplemented
-  CONFIG_TRANSFER = 0x0b,                // Unimplemented
-  FEATURE_FLAGS = 0x0c,                  // Unimplemented
-  CONFIG_UPDATE_TAGS = 0x0d,             // Unimplemented
-  CLIENTBOUND_KNOWN_PACKS = 0x0e,        // Part implemented
-
-  // Serverbound
-  CLIENT_INFORMATION = 0x00,                 // Unimplemented
-  CONFIG_COOKIE_RESPONSE = 0x01,             // Unimplemented
-  CONFIG_SERVERBOUND_PLUGIN_MESSAGE = 0x02,  // Unimplemented
-  ACKNOWLEDGE_FINISH_CONFIG = 0x03,
-  CONFIG_SERVERBOUND_KEEP_ALIVE = 0x04,  // Unimplemented
-  CONFIG_PONG = 0x05,                    // Unimplemented
-  CONFIG_RESOURCE_PACK_RESPONSE = 0x06,  // Unimplemented
-  SERVERBOUND_KNOWN_PACKS = 0x07,        // Unimplemented
-
-  // Play
-
-  // Clientbound
-  BUNDLE_DELIMITER = 0x00,          // Unimplemented
-  SPAWN_ENTITY = 0x01,              // Unimplemented
-  SPAWN_EXPERIENCE_ORB = 0x02,      // Unimplemented
-  ENTITY_ANIMATION = 0x03,          // Unimplemented
-  AWARD_STATISTICS = 0x04,          // Unimplemented
-  ACKNOWLEDGE_BLOCK_CHANGE = 0x05,  // Unimplemented
-  SET_BLOCK_DESTROY_STAGE = 0x06,
-  BLOCK_ENTITY_DATA = 0x07,                    // Unimplemented
-  BLOCK_ACTION = 0x08,                         // Unimplemented
-  BLOCK_UPDATE = 0x09,                         // Unimplemented
-  BOSS_BAR = 0x0a,                             // Unimplemented
-  CLIENTBOUND_CHANGE_DIFFICULTY = 0x0b,        // Unimplemented
-  CHUNK_BATCH_FINISHED = 0x0c,
-  CHUNK_BATCH_START = 0x0d,                    // Unimplemented
-  CHUNK_BATCH_BIOMES = 0x0e,                   // Unimplemented
-  CLEAR_TITLES = 0x0f,                         // Unimplemented
-  COMMAND_SUGGESTION_RESPONSE = 0x10,          // Unimplemented
-  COMMANDS = 0x11,                             // Unimplemented
-  CLIENTBOUND_CLOSE_CONTAINER = 0x12,          // Unimplemented
-  SET_CONTAINER_CONTENT = 0x13,                // Unimplemented
-  SET_CONTAINER_PROPERTY = 0x14,               // Unimplemented
-  SET_CONTAINER_SLOT = 0x15,                   // Unimplemented
-  PLAY_COOKIE_REQUEST = 0x16,                  // Unimplemented
-  SET_COOLDOWN = 0x17,                         // Unimplemented
-  CHAT_SUGGESTIONS = 0x18,                     // Unimplemented
-  PLAY_CLIENTBOUND_PLUGIN_MESSAGE = 0x19,      // Unimplemented
-  DAMAGE_EVENT = 0x1a,                         // Unimplemented
-  DEBUG_SAMPLE = 0x1b,                         // Unimplemented
-  DELETE_MESSAGE = 0x1c,                       // Unimplemented
-  DISCONNECT = 0x1d,                           // Unimplemented
-  DISGUISED_CHAT_MESSAGE = 0x1e,               // Unimplemented
-  ENTITY_EVENT = 0x1f,                         // Unimplemented
-  EXPLOSION = 0x20,                            // Unimplemented
-  UNLOAD_CHUNK = 0x21,                         // Unimplemented
-  GAME_EVENT = 0x22,                           // Unimplemented
-  OPEN_HORSE_SCREEN = 0x23,                    // Unimplemented
-  HURT_ANIMATION = 0x24,                       // Unimplemented
-  INITALIZE_WORLD_BORDER = 0x25,               // Unimplemented
-  CLIENTBOUND_KEEPALIVE = 0x26,                // Unimplemented
-  CHUNK_DATA_AND_UPDATE_LIGHT = 0x27,          // Unimplemented
-  WORLD_EVENT = 0x28,                          // Unimplemented, used for sounds and particles
-  PARTICLE = 0x29,                             // Unimplemented
-  UPDATE_LIGHT = 0x2a,                         // Unimplemented
-  PLAY_LOGIN = 0x2b,                           // Unimplemented
-  MAP_DATA = 0x2c,                             // Unimplemented
-  MERCHANT_OFFERS = 0x2d,                      // Unimplemented
-  UPDATE_ENTITY_POSITION = 0x2e,               // Unimplemented
-  UPDATE_ENTITY_POSITION_AND_ROTATION = 0x2f,  // Unimplemented
-  UPDATE_ENTITY_ROTATION = 0x30,               // Unimplemented
-  CLIENTBOUND_MOVE_VEHICLE = 0x31,             // Unimplemented
-  OPEN_BOOK = 0x32,                            // Unimplemented
-  OPEN_SCREEN = 0x33,                          // Unimplemented
-  OPEN_SIGN_EDITOR = 0x34,                     // Unimplemented
-  PLAY_PING = 0x35,                            // Unimplemented
-  PLAY_PING_RESPONSE = 0x36,                   // Unimplemented
-  PLACE_GHOST_RECIPE = 0x37,                   // Unimplemented
-  CLIENTBOUND_PLAYER_ABILITIES = 0x38,         // Unimplemented
-  PLAYER_CHAT_MESSAGE = 0x39,                  // Unimplemented
-  END_COMBAT = 0x3a,                           // Unimplemented
-  ENTER_COMBAT = 0x3b,                         // Unimplemented
-  COMBAT_DEATH = 0x3c,                         // Unimplemented
-  PLAYER_INFO_REMOVE = 0x3d,                   // Unimplemented
-  PLAYER_INFO_UPDATE = 0x3e,                   // Unimplemented
-  LOOK_AT = 0x3f,                              // Unimplemented
-  SYNCHRONIZE_PLAYER_POSITION = 0x40,          // Unimplemented
-  UPDATE_RECIPE_BOOK = 0x41,                   // Unimplemented
-  REMOVE_ENTITIES = 0x42,                      // Unimplemented
-  REMOVE_ENTITY_EFFECT = 0x43,                 // Unimplemented
-  RESET_SCORE = 0x44,                          // Unimplemented
-  PLAY_REMOVE_RESOURCE_PACK = 0x45,            // Unimplemented
-  PLAY_ADD_RESOURCE_PACK = 0x46,               // Unimplemented
-  RESPAWN = 0x47,                              // Unimplemented
-  SET_HEAD_ROTATION = 0x48,                    // Unimplemented
-  UPDATE_SECTION_BLOCKS = 0x49,                // Unimplemented
-  SELECT_ADVANCEMENTS_TAB = 0x4a,              // Unimplemented
-  SERVER_DATA = 0x4b,                          // Unimplemented
-  SET_ACTION_BAR_TEXT = 0x4c,                  // Unimplemented
-  SET_BORDER_CENTER = 0x4d,                    // Unimplemented
-  SET_BORDER_LERP_SIZE = 0x4e,                 // Unimplemented
-  SET_BORDER_SIZE = 0x4f,                      // Unimplemented
-  SET_BORDER_WARNING_DELAY = 0x50,             // Unimplemented
-  SET_BORDER_WARNING_DISTANCE = 0x51,          // Unimplemented
-  SET_CAMERA = 0x52,                           // Unimplemented
-  CLIENTBOUND_SET_HELD_ITEM = 0x53,            // Unimplemented
-  SET_CENTER_CHUNK = 0x54,                     // Unimplemented
-  SET_RENDER_DISTANCE = 0x55,                  // Unimplemented
-  SET_DEFAULT_SPAWN_POSITION = 0x56,           // Unimplemented
-  DISPLAY_OBJECTIVE = 0x57,                    // Unimplemented
-  SET_ENTITY_METADATA = 0x58,                  // Unimplemented
-  LINK_ENTITIES = 0x59,                        // Unimplemented
-  SET_ENTITY_VELOCITY = 0x5a,                  // Unimplemented
-  SET_EQUIPMENT = 0x5b,                        // Unimplemented
-  SET_EXPERIENCE = 0x5c,                       // Unimplemented
-  SET_HEALTH = 0x5d,                           // Unimplemented
-  UPDATE_OBJECTIVES = 0x5e,                    // Unimplemented
-  SET_PASSENGERS = 0x5f,                       // Unimplemented
-  UPDATE_TEAMS = 0x60,                         // Unimplemented
-  UPDATE_SCORE = 0x61,                         // Unimplemented
-  SET_SIMULATION_DISTANCE = 0x62,              // Unimplemented
-  SET_SUBTITLE_TEXT = 0x63,                    // Unimplemented
-  UPDATE_TIME = 0x64,                          // Unimplemented
-  SET_TITLE_TEXT = 0x65,                       // Unimplemented
-  SET_TITLE_ANIMATION_TIMES = 0x66,            // Unimplemented
-  ENTITY_SOUND_EFFECT = 0x67,                  // Unimplemented
-  SOUND_EFFECT = 0x68,                         // Unimplemented
-  START_CONFIGURATION = 0x69,                  // Unimplemented
-  STOP_SOUND = 0x6a,                           // Unimplemented
-  PLAY_STORE_COOKIE = 0x6b,                    // Unimplemented
-  SYSTEM_CHAT_MESSAGE = 0x6c,                  // Unimplemented
-  SET_TAB_LIST_HEADER_AND_FOOTER = 0x6d,       // Unimplemented
-  TAG_QUERY_RESPONSE = 0x6e,                   // Unimplemented
-  PICKUP_ITEM = 0x6f,                          // Unimplemented
-  TELEPORT_ENTITY = 0x70,                      // Unimplemented
-  SET_TICKING_STATE = 0x71,                    // Unimplemented
-  STEP_TICK = 0x72,                            // Unimplemented
-  PLAY_TRANFER = 0x73,                         // Unimplemented
-  UPDATE_ADVANCEMENTS = 0x74,                  // Unimplemented
-  UPDATE_ATTRIBUTES = 0x75,                    // Unimplemented
-  ENTITY_EFFECTS = 0x76,                       // Unimplemented
-  UPDATE_RECIPES = 0x77,                       // Unimplemented
-  PLAY_UPDATE_TAGS = 0x78,                     // Unimplemented
-  PROJECTILE_POWER = 0x79,                     // Unimplemented
-
-  // Serverbound
-
-  CONFIRM_TELEPORTATION = 0x00,             // Unimplemented
-  QUERY_BLOCK_ENTITY_TAG = 0x01,            // Unimplemented
-  SERVERBOUND_CHANGE_DIFFICULTY = 0x02,     // Unimplemented
-  ACKNOWLEDGE_MESSAGE = 0x03,               // Unimplemented
-  CHAT_COMMAND = 0x04,                      // Unimplemented
-  SIGNED_CHAT_COMMAND = 0x05,               // Unimplemented
-  CHAT_MESSAGE = 0x06,                      // Unimplemented
-  PLAYER_SESSION = 0x07,                    // Unimplemented
-  CHUNK_BATCH_RECEIVED = 0x08,
-  CLIENT_STATUS = 0x09,                     // Unimplemented
-  PLAY_CLIENT_INFORMATION = 0x0a,           // Unimplemented
-  COMMAND_SUGGESTION_REQUEST = 0x0b,        // Unimplemented
-  ACKNOWLEDGE_CONFIGURATION = 0x0c,         // Unimplemented
-  CLICK_CONTAINER_BUTTON = 0x0d,            // Unimplemented
-  CLICK_CONTAINER = 0x0e,                   // Unimplemented
-  SERVERBOUND_CLOSE_CONTAINER = 0x0f,       // Unimplemented
-  CHANGE_CONTAINER_SLOT_STATE = 0x10,       // Unimplemented
-  PLAY_COOKIE_RESPONSE = 0x11,              // Unimplemented
-  PLAY_SERVERBOUND_PLUGIN_MESSAGE = 0x12,   // Unimplemented
-  DEBUG_SAMPLE_SUBSCRIPTION = 0x13,         // Unimplemented
-  EDIT_BOOK = 0x14,                         // Unimplemented
-  QUERY_ENTITY_TAG = 0x15,                  // Unimplemented
-  INTERACT = 0x16,                          // Unimplemented
-  JIGSAW_GENERATE = 0x17,                   // Unimplemented
-  PLAY_SERVERBOUND_KEEP_ALIVE = 0x18,       // Unimplemented
-  LOCK_DIFFICULTY = 0x19,                   // Unimplemented
-  SET_PLAYER_POSITION = 0x1a,               // Unimplemented
-  SET_PLAYER_POSITION_AND_ROTATION = 0x1b,  // Unimplemented
-  SET_PLAYER_ROTATION = 0x1c,               // Unimplemented
-  SET_PLAYER_ON_GROUND = 0x1d,              // Unimplemented
-  SERVERBOUND_MOVE_VEHICLE = 0x1e,          // Unimplemented
-  PADDLE_BOAT = 0x1f,                       // Unimplemented
-  PICK_ITEM = 0x20,                         // Unimplemented
-  PLAY_PING_REQUEST = 0x21,
-  PLACE_RECIPE = 0x22,                      // Unimplemented
-  SERVERBOUND_PLAYER_ABILITIES = 0x23,      // Unimplemented
-  PLAYER_ACTION = 0x24,                     // Unimplemented
-  PLAYER_COMMAND = 0x25,                    // Unimplemented
-  PLAYER_INPUT = 0x26,                      // Unimplemented
-  PLAY_PONG = 0x27,                         // Unimplemented
-  CHANGE_RECIPE_BOOK_SETTINGS = 0x28,       // Unimplemented
-  SET_SEEN_RECIPE = 0x29,                   // Unimplemented
-  RENAME_ITEM = 0x2a,                       // Unimplemented
-  PLAY_RESOUCE_PACK_RESPONSE = 0x2b,        // Unimplemented
-  SEEN_ADVANCEMENTS = 0x2c,                 // Unimplemented
-  SELECT_TRADE = 0x2d,                      // Unimplemented
-  SET_BEACON_EFFECT = 0x2e,                 // Unimplemented
-  SERVERBOUND_SET_HELD_ITEM = 0x2f,         // Unimplemented
-  PROGRAM_COMMAND_BLOCK = 0x30,             // Unimplemented
-  PROGRAM_COMMAND_BLOCK_MINECART = 0x31,    // Unimplemented
-  SET_CREATIVE_MODE_SLOT = 0x32,            // Unimplemented
-  PROGRAM_JIGSAW_BLOCK = 0x33,              // Unimplemented
-  PROGRAM_STRUCTURE_BLOCK = 0x34,           // Unimplemented
-  UPDATE_SIGN = 0x35,                       // Unimplemented
-  SWING_ARM = 0x36,                         // Unimplemented
-  TELEPORT_TO_ENTITY = 0x37,                // Unimplemented
-  USE_ITEM_ON = 0x38,                       // Unimplemented
-  USE_ITEM = 0x39,                          // Unimplemented
-
-} PacketType;
 
 /* --- Macros --- */
 #define max(a, b)           \
@@ -480,7 +242,7 @@ void mcapi_send_handshake(mcapiConnection *conn, mcapiHandshakePacket p) {
 void mcapi_send_login_start(mcapiConnection *conn, mcapiLoginStartPacket p) {
   reusable_buffer.cursor = 0;
   reusable_buffer.buf.len = 0;
-  write_varint(&reusable_buffer, LOGIN_START);  // Packet ID
+  write_varint(&reusable_buffer, PTYPE_LOGIN_SB_HELLO);  // Packet ID
   write_string(&reusable_buffer, p.username);
   write_uuid(&reusable_buffer, p.uuid);
 
@@ -495,7 +257,7 @@ typedef struct EncryptionResponsePacket {
 void send_encryption_response_packet(mcapiConnection *conn, EncryptionResponsePacket p) {
   reusable_buffer.cursor = 0;
   reusable_buffer.buf.len = 0;
-  write_varint(&reusable_buffer, ENCRYPTION_RESPONSE);  // Packet ID
+  write_varint(&reusable_buffer, PTYPE_LOGIN_SB_KEY);  // Packet ID
   write_varint(&reusable_buffer, p.enc_shared_secret.len);
   write_buffer(&reusable_buffer, p.enc_shared_secret);
   write_varint(&reusable_buffer, p.enc_verify_token.len);
@@ -509,14 +271,14 @@ void send_encryption_response_packet(mcapiConnection *conn, EncryptionResponsePa
 void mcapi_send_login_acknowledged(mcapiConnection *conn) {
   reusable_buffer.cursor = 0;
   reusable_buffer.buf.len = 0;
-  write_varint(&reusable_buffer, LOGIN_ACKNOWLEDGED);  // Packet ID
+  write_varint(&reusable_buffer, PTYPE_LOGIN_SB_LOGIN_ACKNOWLEDGED);  // Packet ID
   send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
 }
 
 void mcapi_send_acknowledge_finish_config(mcapiConnection *conn) {
   reusable_buffer.cursor = 0;
   reusable_buffer.buf.len = 0;
-  write_varint(&reusable_buffer, ACKNOWLEDGE_FINISH_CONFIG);  // Packet ID
+  write_varint(&reusable_buffer, PTYPE_CONFIGURATION_SB_FINISH_CONFIGURATION);  // Packet ID
 
   send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
 }
@@ -525,7 +287,7 @@ void mcapi_send_serverbound_known_packs(mcapiConnection *conn, mcapiServerboundK
   reusable_buffer.cursor = 0;
   reusable_buffer.buf.len = 0;
 
-  write_varint(&reusable_buffer, SERVERBOUND_KNOWN_PACKS);
+  write_varint(&reusable_buffer, PTYPE_CONFIGURATION_SB_SELECT_KNOWN_PACKS);
   write_varint(&reusable_buffer, 0);
 
   send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
@@ -535,7 +297,7 @@ void mcapi_send_confirm_teleportation(mcapiConnection *conn, mcapiConfirmTelepor
   reusable_buffer.cursor = 0;
   reusable_buffer.buf.len = 0;
 
-  write_varint(&reusable_buffer, CONFIRM_TELEPORTATION);
+  write_varint(&reusable_buffer, PTYPE_PLAY_SB_ACCEPT_TELEPORTATION);
   write_varint(&reusable_buffer, packet.teleport_id);
 
   send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
@@ -545,7 +307,7 @@ void mcapi_send_set_player_position_and_rotation(mcapiConnection *conn, mcapiSet
   reusable_buffer.cursor = 0;
   reusable_buffer.buf.len = 0;
 
-  write_varint(&reusable_buffer, SET_PLAYER_POSITION_AND_ROTATION);
+  write_varint(&reusable_buffer, PTYPE_PLAY_SB_MOVE_PLAYER_POS_ROT);
   write_double(&reusable_buffer, packet.x);
   write_double(&reusable_buffer, packet.y);
   write_double(&reusable_buffer, packet.z);
@@ -560,7 +322,7 @@ void mcapi_send_player_action(mcapiConnection *conn, mcapiPlayerActionPacket pac
   reusable_buffer.cursor = 0;
   reusable_buffer.buf.len = 0;
 
-  write_varint(&reusable_buffer, PLAYER_ACTION);
+  write_varint(&reusable_buffer, PTYPE_PLAY_SB_PLAYER_ACTION);
   write_varint(&reusable_buffer, packet.status);
   write_ipos(&reusable_buffer, packet.position);
   write_byte(&reusable_buffer, packet.face);
@@ -573,7 +335,7 @@ void mcapi_send_chunk_batch_received(mcapiConnection* conn, mcapiChunkBatchRecei
   reusable_buffer.cursor = 0;
   reusable_buffer.buf.len = 0;
 
-  write_varint(&reusable_buffer, CHUNK_BATCH_RECEIVED);
+  write_varint(&reusable_buffer, PTYPE_PLAY_SB_CHUNK_BATCH_RECEIVED);
   write_float(&reusable_buffer, packet.chunks_per_tick);
 
   send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
@@ -583,7 +345,7 @@ void mcapi_send_play_pong(mcapiConnection *conn, mcapiPlayPongPacket packet) {
   reusable_buffer.cursor = 0;
   reusable_buffer.buf.len = 0;
 
-  write_varint(&reusable_buffer, PLAY_PONG);
+  write_varint(&reusable_buffer, PTYPE_PLAY_SB_PONG);
   write_int(&reusable_buffer, packet.id);
 
   send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
@@ -594,7 +356,7 @@ void mcapi_send_play_ping_request(mcapiConnection *conn, mcapiPingRequestPacket 
   reusable_buffer.cursor = 0;
   reusable_buffer.buf.len = 0;
 
-  write_varint(&reusable_buffer, PLAY_PING_REQUEST);
+  write_varint(&reusable_buffer, PTYPE_PLAY_SB_PING_REQUEST);
   write_long(&reusable_buffer, packet.id);
 
   send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
@@ -604,7 +366,7 @@ void mcapi_send_serverbound_keepalive(mcapiConnection* conn, mcapiServerboundKee
   reusable_buffer.cursor = 0;
   reusable_buffer.buf.len = 0;
 
-  write_varint(&reusable_buffer, PLAY_SERVERBOUND_KEEP_ALIVE);
+  write_varint(&reusable_buffer, PTYPE_PLAY_SB_KEEP_ALIVE);
   write_long(&reusable_buffer, packet.id);
 
   send_packet(conn, resizable_buffer_to_buffer(reusable_buffer.buf));
@@ -778,13 +540,24 @@ void read_light_data_from_packet(ReadableBuffer *p, uint8_t block_light_array[26
   destroy_bitset(empty_block_light_mask);
 }
 
+int calc_compressed_arr_len(int entries, int bits_per_entry) {
+  int entries_per_long = floor(64.0 / bits_per_entry);
+  int long_count = ceil((float)entries / entries_per_long);
+  return long_count;
+}
+
 mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *p) {
   mcapiChunkAndLightDataPacket res = {};
+
   res.chunk_x = read_int(p);
   res.chunk_z = read_int(p);
-  printf("Chunk x=%d z=%d\n", res.chunk_x, res.chunk_z);
-  res.heightmaps = read_nbt(p);
+
+  // Jump to after the heightmap
+  p->cursor = 0x388;
+  printf("Got chunk x=%d z=%d\n", res.chunk_x, res.chunk_z);
   int data_len = read_varint(p);
+
+  int startp = p->cursor;
 
   res.chunk_section_count = 24;
   res.chunk_sections = calloc(24, sizeof(mcapiChunkSection));
@@ -792,23 +565,28 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
     res.chunk_sections[i].block_count = read_short(p);
     {
       uint8_t bits_per_entry = read_byte(p);
+      DEBUG("bpe blocks = %d, ci = %d, p = %x\n", bits_per_entry, i, p->cursor);
       if (bits_per_entry == 0) {
-        int value = read_byte(p);
+        int value = read_varint(p);
+        printf("palette_all = %d\n", value);
 
         for (int j = 0; j < 4096; j++) {
           res.chunk_sections[i].blocks[j] = value;
         }
 
-        read_varint(p);  // Read the length of the data array (always 0)
+        // read_varint(p);  // Read the length of the data array (always 0)
       } else if (bits_per_entry <= 8) {
         int palette_len = read_varint(p);
         int palette[palette_len];
 
         for (int j = 0; j < palette_len; j++) {
           palette[j] = read_varint(p);
+          printf("palette[%d] = %d\n", j, palette[j]);
         }
 
-        int compressed_blocks_len = read_varint(p);
+        // int compressed_blocks_len = read_varint(p);
+        int compressed_blocks_len = calc_compressed_arr_len(4096, bits_per_entry);
+        DEBUG("compressed_blocks_len %d\n", compressed_blocks_len);
         read_compressed_long_arr(p, bits_per_entry, 4096, compressed_blocks_len, res.chunk_sections[i].blocks);
 
         for (int j = 0; j < 4096; j++) {
@@ -818,7 +596,13 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
         }
 
       } else {
-        int compressed_blocks_len = read_varint(p);
+        // int compressed_blocks_len = read_varint(p);
+        int compressed_blocks_len = calc_compressed_arr_len(4096, bits_per_entry);
+        DEBUG("compressed_blocks_len no palette %d\n", compressed_blocks_len);
+        printf("no_palette!!!!!!!!!!!!! %d %d\n", bits_per_entry, compressed_blocks_len);
+        if (compressed_blocks_len < 10) {
+          exit(1);
+        }
 
         read_compressed_long_arr(p, bits_per_entry, 4096, compressed_blocks_len, res.chunk_sections[i].blocks);
       }
@@ -827,12 +611,12 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
     // Read biomes
     {
       uint8_t bits_per_entry = read_byte(p);
+      DEBUG("bpe biomes = %d p = %x\n", bits_per_entry, p->cursor);
       if (bits_per_entry == 0) {
-        int value = read_byte(p);
+        int value = read_varint(p);
         for (int j = 0; j < 64; j++) {
           res.chunk_sections[i].biomes[j] = value;
         }
-        read_varint(p);  // Read the length of the data array (always 0)
       } else if (bits_per_entry <= 3) {
         int palette_len = read_varint(p);
         int palette[palette_len];
@@ -841,7 +625,8 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
           palette[j] = read_varint(p);
         }
 
-        int compressed_biomes_len = read_varint(p);
+        // int compressed_biomes_len = read_varint(p);
+        int compressed_biomes_len = calc_compressed_arr_len(64, bits_per_entry);
 
         read_compressed_long_arr(p, bits_per_entry, 64, compressed_biomes_len, res.chunk_sections[i].biomes);
 
@@ -849,15 +634,21 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
           res.chunk_sections[i].biomes[j] = palette[res.chunk_sections[i].biomes[j]];
         }
       } else {
-        int compressed_biomes_len = read_varint(p);
+        // int compressed_biomes_len = read_varint(p);
+        int compressed_biomes_len = calc_compressed_arr_len(64, bits_per_entry);
         read_compressed_long_arr(p, bits_per_entry, 64, compressed_biomes_len, res.chunk_sections[i].biomes);
       }
     }
   }
 
+  DEBUG("data_len=%d data_read=%d\n", data_len, p->cursor - startp);
+
+  p->cursor = startp + data_len;
+
   // Block entities
 
   res.block_entity_count = read_varint(p);
+  DEBUG("block_entity_count=%d\n", res.block_entity_count);
   res.block_entities = malloc(sizeof(mcapiBlockEntity) * res.block_entity_count);
   for (int i = 0; i < res.block_entity_count; i++) {
     uint8_t xz = read_byte(p);
@@ -868,14 +659,17 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
     res.block_entities[i].data = read_nbt(p);
   }
 
+
   // Sky and block lights
   read_light_data_from_packet(p, res.block_light_array, res.sky_light_array);
+
+
 
   return res;
 }
 
 void destroy_chunk_and_light_data_packet(mcapiChunkAndLightDataPacket p) {
-  destroy_nbt(p.heightmaps);
+  // destroy_nbt(p.heightmaps);
   free(p.chunk_sections);
   for (int i = 0; i < p.block_entity_count; i++) {
     destroy_nbt(p.block_entities[i].data);
@@ -902,13 +696,16 @@ mcapiChunkBatchFinishedPacket read_chunk_batch_finished_packet(ReadableBuffer *p
 
 mcapiSynchronizePlayerPositionPacket create_synchronize_player_position_data_packet(ReadableBuffer *p) {
   mcapiSynchronizePlayerPositionPacket res = {};
+  res.teleport_id = read_varint(p);
   res.x = read_double(p);
   res.y = read_double(p);
   res.z = read_double(p);
+  res.vx = read_double(p);
+  res.vy = read_double(p);
+  res.vz = read_double(p);
   res.yaw = read_float(p);
   res.pitch = read_float(p);
   res.flags = read_byte(p);
-  res.teleport_id = read_varint(p);
   return res;
 }
 
@@ -1162,17 +959,17 @@ void mcapi_poll(mcapiConnection *conn) {
         // mcapi_print_buf(curr_packet.buf);
         if (conn->state == MCAPI_STATE_LOGIN) {
           switch (type) {
-            case SET_COMPRESSION:
+            case PTYPE_LOGIN_CB_LOGIN_COMPRESSION:
               printf("Enabling compression\n");
               conn->compression_threshold = read_set_compression_packet(&curr_packet).threshold;
               break;
-            case ENCRYPTION_REQUEST:
+            case PTYPE_LOGIN_CB_HELLO:
               printf("Enabling encryption\n");
               EncryptionRequestPacket encrypt_req = read_encryption_request_packet(&curr_packet);
               enable_encryption(conn, encrypt_req);
-
               break;
-            case LOGIN_SUCCESS:
+              // case PTYPE_LOGIN_CB_GAME_PROFILE:
+            case PTYPE_LOGIN_CB_LOGIN_FINISHED:
               mcapiLoginSuccessPacket packet = create_login_success_packet(&curr_packet);
               if (conn->login_success_cb) (*conn->login_success_cb)(conn, packet);
               destroy_login_success_packet(packet);
@@ -1183,15 +980,15 @@ void mcapi_poll(mcapiConnection *conn) {
           }
         } else if (conn->state == MCAPI_STATE_CONFIG) {
           switch (type) {
-            case FINISH_CONFIG:
+            case PTYPE_CONFIGURATION_CB_FINISH_CONFIGURATION:
               if (conn->finish_config_cb) (*conn->finish_config_cb)(conn);
               break;
-            case CLIENTBOUND_KNOWN_PACKS:
+            case PTYPE_CONFIGURATION_CB_SELECT_KNOWN_PACKS:
               mcapiClientboundKnownPacksPacket packet = create_clientbound_known_packs_packet(&curr_packet);
               if (conn->clientbound_known_packs_cb) (*conn->clientbound_known_packs_cb)(conn, packet);
               destroy_clientbound_known_packs_packet(packet);
               break;
-            case REGISTRY_DATA:
+            case PTYPE_CONFIGURATION_CB_REGISTRY_DATA:
               mcapiRegistryDataPacket registry_data_packet = create_registry_data_packet(&curr_packet);
               if (conn->registry_data_cb) (*conn->registry_data_cb)(conn, registry_data_packet);
               destroy_registry_data_packet(registry_data_packet);
@@ -1203,40 +1000,40 @@ void mcapi_poll(mcapiConnection *conn) {
 
         } else if (conn->state == MCAPI_STATE_PLAY) {
           switch (type) {
-            case SET_BLOCK_DESTROY_STAGE:
+            case PTYPE_PLAY_CB_BLOCK_DESTRUCTION:
               mcapiSetBlockDestroyStagePacket sbds_packet = read_set_block_destroy_stage_packet(&curr_packet);
               if (conn->set_block_destroy_stage_cb) (*conn->set_block_destroy_stage_cb)(conn, sbds_packet);
               break;
-            case CHUNK_DATA_AND_UPDATE_LIGHT:
+            case PTYPE_PLAY_CB_LEVEL_CHUNK_WITH_LIGHT:
               mcapiChunkAndLightDataPacket chunk_packet = create_chunk_and_light_data_packet(&curr_packet);
               if (conn->chunk_and_light_data_cb) (*conn->chunk_and_light_data_cb)(conn, chunk_packet);
               destroy_chunk_and_light_data_packet(chunk_packet);
               break;
-            case CHUNK_BATCH_FINISHED:
+            case PTYPE_PLAY_CB_CHUNK_BATCH_FINISHED:
               mcapiChunkBatchFinishedPacket cbf_packet = read_chunk_batch_finished_packet(&curr_packet);
               if (conn->chunk_batch_finished_cb) (*conn->chunk_batch_finished_cb)(conn, cbf_packet);
               break;
-            case UPDATE_LIGHT:
+            case PTYPE_PLAY_CB_LIGHT_UPDATE:
               mcapiUpdateLightPacket light_packet = read_update_light_packet(&curr_packet);
               if (conn->update_light_cb) (*conn->update_light_cb)(conn, light_packet);
               break;
-            case BLOCK_UPDATE:
+            case PTYPE_PLAY_CB_BLOCK_UPDATE:
               mcapiBlockUpdatePacket bu_packet = read_block_update_packet(&curr_packet);
               if (conn->block_update_cb) (*conn->block_update_cb)(conn, bu_packet);
               break;
-            case SYNCHRONIZE_PLAYER_POSITION:
+            case PTYPE_PLAY_CB_PLAYER_POSITION:
               mcapiSynchronizePlayerPositionPacket sync_packet = create_synchronize_player_position_data_packet(&curr_packet);
               if (conn->synchronize_player_position_cb) (*conn->synchronize_player_position_cb)(conn, sync_packet);
               break;
-            case UPDATE_TIME:
+            case PTYPE_PLAY_CB_SET_TIME:
               mcapiUpdateTimePacket time_packet = create_update_time_packet(&curr_packet);
               if (conn->update_time_cb) (*conn->update_time_cb)(conn, time_packet);
               break;
-            case CLIENTBOUND_KEEPALIVE:
+            case PTYPE_CONFIGURATION_CB_KEEP_ALIVE:
               mcapiClientboundKeepAlivePacket ka_packet = read_clientbound_keepalive_packet(&curr_packet);
               if (conn->clientbound_keepalive_cb) (*conn->clientbound_keepalive_cb)(conn, ka_packet);
               break;
-            case PLAY_PING_RESPONSE:
+            case PTYPE_PLAY_CB_PING:
               DEBUG("Got ping response!\n");
               break;
             default:

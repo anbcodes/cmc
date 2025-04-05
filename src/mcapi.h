@@ -235,6 +235,9 @@ typedef struct mcapiSynchronizePlayerPositionPacket {
   double x;
   double y;
   double z;
+  double vx;
+  double vy;
+  double vz;
   float yaw;
   float pitch;
   uint8_t flags;
