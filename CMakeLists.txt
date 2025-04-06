@@ -7,6 +7,7 @@ add_subdirectory(lib/glfw)
 add_subdirectory(lib/cglm)
 
 set (CMAKE_C_STANDARD 23)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_executable(cmc src/main.c
   src/framework.c
@@ -18,6 +19,8 @@ add_executable(cmc src/main.c
   src/cJSON.c
   src/lodepng/lodepng.c
 )
+target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
+
 
 target_link_libraries(cmc PUBLIC "${CMAKE_SOURCE_DIR}/lib/wgpu/libwgpu_native.a")
 target_link_libraries(cmc PUBLIC crypto)
@@ -26,7 +29,6 @@ target_link_libraries(cmc PUBLIC libdeflate_static)
 target_link_libraries(cmc PUBLIC glfw)
 target_link_libraries(cmc PUBLIC cglm)
 
-target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
 
 target_include_directories(cmc PUBLIC "${CMAKE_SOURCE_DIR}/lib/libdeflate")
 target_include_directories(cmc PUBLIC "${CMAKE_SOURCE_DIR}/lib/glfw/include")
