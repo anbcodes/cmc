@@ -224,7 +224,7 @@ static void handle_request_adapter(
   if (status == WGPURequestAdapterStatus_Success) {
     game.adapter = adapter;
   } else {
-    printf(LOG_PREFIX " request_adapter status=%#.8x message=%s\n", status, message);
+    WARN(LOG_PREFIX " request_adapter status=%#.8x message=%s", status, message);
   }
 }
 static void handle_request_device(
@@ -236,7 +236,7 @@ static void handle_request_device(
   if (status == WGPURequestDeviceStatus_Success) {
     game.device = device;
   } else {
-    printf(LOG_PREFIX " request_device status=%#.8x message=%s\n", status, message);
+    WARN(LOG_PREFIX " request_device status=%#.8x message=%s", status, message);
   }
 }
 static void handle_glfw_key(
@@ -362,7 +362,7 @@ static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int act
                                                   .status = MCAPI_ACTION_DIG_START,
                                                   .sequence_num = game.block_breaking_seq_num,
                                                 });
-            printf("Sending break start face=%d, x=%d, y=%d, z=%d, seq=%d\n", game.block_breaking_face, game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2], game.block_breaking_seq_num);
+            DEBUG("Sending break start face=%d, x=%d, y=%d, z=%d, seq=%d", game.block_breaking_face, game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2], game.block_breaking_seq_num);
             break;
           case GLFW_MOUSE_BUTTON_RIGHT:
             vec3 air_position;
@@ -382,7 +382,7 @@ static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int act
                                                   .status = MCAPI_ACTION_DIG_CANCEL,
                                                   .sequence_num = game.block_breaking_seq_num,
                                                 });
-            printf("Sending break cancel face=%d, x=%d, y=%d, z=%d, seq=%d\n", game.block_breaking_face, game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2], game.block_breaking_seq_num);
+            DEBUG("Sending break cancel face=%d, x=%d, y=%d, z=%d, seq=%d", game.block_breaking_face, game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2], game.block_breaking_seq_num);
             game.block_breaking_start = 0;
           }
       }
@@ -590,12 +590,14 @@ void update_player_position(float dt) {
 }
 
 void on_login_success(mcapiConnection *conn, mcapiLoginSuccessPacket packet) {
-  printf("Username: ");
+  INFO("Finished login");
+  INFO_NN("  Username: ");
   print_string(packet.username);
-  printf("\nUUID: %016lx%016lx\n", packet.uuid.upper, packet.uuid.lower);
-  printf("%d Properties:\n", packet.number_of_properties);
+  printf("\n");
+  INFO("  UUID: %016lx%016lx", packet.uuid.upper, packet.uuid.lower);
+  INFO("  %d Properties:", packet.number_of_properties);
   for (int i = 0; i < packet.number_of_properties; i++) {
-    printf("  ");
+    INFO_NN("    ");
     print_string(packet.properties[i].name);
     printf(": ");
     print_string(packet.properties[i].value);
@@ -683,7 +685,7 @@ void on_finish_config(mcapiConnection *conn) {
 
   mcapi_set_state(conn, MCAPI_STATE_PLAY);
 
-  printf("Playing!\n");
+  INFO("Playing!");
 }
 
 void on_chunk(mcapiConnection *conn, mcapiChunkAndLightDataPacket packet) {
@@ -715,10 +717,10 @@ void on_chunk(mcapiConnection *conn, mcapiChunkAndLightDataPacket packet) {
 
 void on_light(mcapiConnection *conn, mcapiUpdateLightPacket packet) {
   UNUSED(conn)
-  printf("Light updated!!! %d, %d\n", packet.chunk_x, packet.chunk_z);
+  DEBUG("Light updated!!! %d, %d", packet.chunk_x, packet.chunk_z);
   Chunk *chunk = world_chunk(&game.world, packet.chunk_x, packet.chunk_z);
   if (chunk == NULL) {
-    printf("Chunk not loaded!\n");
+    WARN("Chunk not loaded!");
     return;
   }
   // perror("In!\n");
@@ -736,13 +738,13 @@ void on_block_update(mcapiConnection *conn, mcapiBlockUpdatePacket packet) {
   pos[1] = packet.position[1];
   pos[2] = packet.position[2];
 
-  printf("Block update %d %d %d\n", packet.position[0], packet.position[1], packet.position[2]);
+  DEBUG("Block update %d %d %d", packet.position[0], packet.position[1], packet.position[2]);
 
   world_set_block(&game.world, pos, packet.block_id, game.block_info, game.biome_info, game.device);
 }
 
 void on_position(mcapiConnection *conn, mcapiSynchronizePlayerPositionPacket packet) {
-  printf("%f %f %f\n", packet.x, packet.y, packet.z);
+  DEBUG("sync player position %f %f %f", packet.x, packet.y, packet.z);
   game.position[0] = packet.x;
   game.position[1] = packet.y;
   game.position[2] = packet.z;
@@ -771,16 +773,16 @@ void on_update_time(mcapiConnection *conn, mcapiUpdateTimePacket packet) {
 
 void on_set_block_destroy_stage(mcapiConnection *conn, mcapiSetBlockDestroyStagePacket packet) {
   UNUSED(conn)
-  printf("Destroy stage %d\n", packet.stage);
+  DEBUG("Destroy stage %d", packet.stage);
 }
 
 void on_chunk_batch_finished(mcapiConnection *conn, mcapiChunkBatchFinishedPacket packet) {
-  printf("Chunk batch finished chunks=%d\n", packet.batch_size);
+  TRACE("Chunk batch finished chunks=%d", packet.batch_size);
   mcapi_send_chunk_batch_received(conn, (mcapiChunkBatchReceivedPacket) { .chunks_per_tick = 0.1 });
 }
 
 void on_clientbound_keepalive(mcapiConnection *conn, mcapiClientboundKeepAlivePacket packet) {
-  DEBUG("Got keepalive id=%ld, sending!\n", packet.keep_alive_id);
+  DEBUG("Got keepalive id=%ld, sending response!", packet.keep_alive_id);
   mcapi_send_serverbound_keepalive(conn, (mcapiServerboundKeepalivePacket) {.id = packet.keep_alive_id});
 }
 
@@ -1513,7 +1515,7 @@ void block_selected_renderer_init() {
       .usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst,
     }
   );
-  printf("selected uniform buffer %p\n", (void*)game.block_selected_renderer.uniform_buffer);
+  DEBUG("selected uniform buffer %p", (void*)game.block_selected_renderer.uniform_buffer);
 
   float vertices[18 * 4 * 6];
 
@@ -1730,7 +1732,7 @@ void block_selected_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
                                           .status = MCAPI_ACTION_DIG_START,
                                           .sequence_num = game.block_breaking_seq_num,
                                         });
-    printf("Sending break start face=%d, x=%d, y=%d, z=%d, seq=%d\n", game.block_breaking_face, game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2], game.block_breaking_seq_num);
+    DEBUG("Sending break start face=%d, x=%d, y=%d, z=%d, seq=%d", game.block_breaking_face, game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2], game.block_breaking_seq_num);
   }
 
   wgpuQueueWriteBuffer(game.queue, game.block_selected_renderer.uniform_buffer, 0, &game.block_selected_renderer.uniforms, sizeof(game.block_selected_renderer.uniforms));
@@ -1782,28 +1784,28 @@ void load_block_models() {
     snprintf(fname, 1000, "data/assets/minecraft/blockstates/%s.json", block_name);
     cJSON *blockstate = load_json(fname);
     if (blockstate == NULL) {
-      printf("blockstate not found for %s\n", block_name);
+      WARN("blockstate not found for %s", block_name);
       block = block->next;
       cJSON_Delete(blockstate);
       continue;
     }
     cJSON *multipart = cJSON_GetObjectItemCaseSensitive(blockstate, "multipart");
     if (multipart != NULL) {
-      printf("skipping multipart for now: %s\n", block_name);
+      INFO("skipping multipart for now: %s", block_name);
       block = block->next;
       cJSON_Delete(blockstate);
       continue;
     }
     cJSON *variants = cJSON_GetObjectItemCaseSensitive(blockstate, "variants");
     if (variants == NULL) {
-      printf("variants not found for %s\n", block_name);
+      WARN("variants not found for %s", block_name);
       block = block->next;
       cJSON_Delete(blockstate);
       continue;
     }
     cJSON *variant = variants->child;
     if (variant == NULL) {
-      printf("variant not found for %s\n", block_name);
+      WARN("variant not found for %s", block_name);
       block = block->next;
       cJSON_Delete(blockstate);
       continue;
@@ -1814,7 +1816,7 @@ void load_block_models() {
     }
     cJSON *model_name = cJSON_GetObjectItemCaseSensitive(variant, "model");
     if (model_name == NULL) {
-      printf("model not found for %s\n", block_name);
+      WARN("model not found for %s", block_name);
       block = block->next;
       cJSON_Delete(blockstate);
       continue;
@@ -1827,7 +1829,7 @@ void load_block_models() {
     cJSON_Delete(blockstate);
     cJSON *model = load_json(fname);
     if (model == NULL) {
-      printf("model not found for %s\n", block_name);
+      WARN("model not found for %s", block_name);
       block = block->next;
       continue;
     }
@@ -2118,7 +2120,7 @@ void update_block_breaking_stages() {
                                           .status = MCAPI_ACTION_DIG_FINISH,
                                           .sequence_num = game.block_breaking_seq_num,
                                         });
-    printf("Sending block broken face=%d, x=%d, y=%d, z=%d, seq=%d\n", game.block_breaking_face, game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2], game.block_breaking_seq_num);
+    DEBUG("Sending block broken face=%d, x=%d, y=%d, z=%d, seq=%d", game.block_breaking_face, game.block_breaking_position[0], game.block_breaking_position[1], game.block_breaking_position[2], game.block_breaking_seq_num);
     game.block_breaking_start = 0;
   }
 
@@ -2159,7 +2161,7 @@ void tick() {
 }
 
 int main(int argc, char *argv[]) {
-  DEBUG("Starting...\n");
+  INFO("Starting cmc...");
   if (argc < 6) {
     perror("Usage: cmc [username] [server ip] [port] [uuid] [access_token]\n");
     exit(1);
@@ -2172,7 +2174,7 @@ int main(int argc, char *argv[]) {
   char *access_token = argv[5];
 
   if (_port < 1 || _port > 65535) {
-    perror("Invalid port. Must be between 1 and 65535\n");
+    FATAL("Invalid port. Must be between 1 and 65535");
     exit(1);
   }
 
@@ -2260,7 +2262,7 @@ int main(int argc, char *argv[]) {
       case WGPUSurfaceGetCurrentTextureStatus_DeviceLost:
       case WGPUSurfaceGetCurrentTextureStatus_Force32:
         // Fatal error
-        printf(LOG_PREFIX " get_current_texture status=%#.8x\n", surface_texture.status);
+        FATAL(LOG_PREFIX " get_current_texture status=%#.8x", surface_texture.status);
         abort();
     }
     assert(surface_texture.texture);

@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "datatypes.h"
+#include "macros.h"
 #include "protocol.h"
 
 size_t nbt_reader(void *_p, uint8_t *data, size_t size) {
@@ -10,7 +11,7 @@ size_t nbt_reader(void *_p, uint8_t *data, size_t size) {
 
   int to_read = min(size, p->buf.len - p->cursor);
 
-  printf("c: cursor=%d, buflen=%ld, to_read=%d, reqsize=%ld\n", p->cursor, p->buf.len, to_read, size);
+  DEBUG("c: cursor=%d, buflen=%ld, to_read=%d, reqsize=%ld", p->cursor, p->buf.len, to_read, size);
 
   for (int i = 0; i < to_read; i++) {
     data[i] = read_byte(p);
@@ -59,7 +60,6 @@ void read_nbt_value(ReadableBuffer *p, NBT *nbt, NBTTagType type) {
       break;
     case NBT_BYTE_ARRAY:
       size = read_int(p);
-      printf("byte_array_size %d\n", size);
       nbt->byte_array_value = read_bytes(p, size);
       break;
     case NBT_STRING:

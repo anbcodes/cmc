@@ -1,28 +1,27 @@
 #include "framework.h"
+#include "macros.h"
 
 static void log_callback(WGPULogLevel level, char const *message, void *userdata) {
   UNUSED(userdata)
-  char *level_str;
   switch (level) {
     case WGPULogLevel_Error:
-      level_str = "error";
+      ERROR("[wgpu] %s", message);
       break;
     case WGPULogLevel_Warn:
-      level_str = "warn";
+      WARN("[wgpu] %s", message);
       break;
     case WGPULogLevel_Info:
-      level_str = "info";
+      INFO("[wgpu] %s", message);
       break;
     case WGPULogLevel_Debug:
-      level_str = "debug";
+      DEBUG("[wgpu] %s", message);
       break;
     case WGPULogLevel_Trace:
-      level_str = "trace";
+      TRACE("[wgpu] %s", message);
       break;
     default:
-      level_str = "unknown_level";
+      INFO("[wgpu] %s", message);
   }
-  fprintf(stderr, "[wgpu] [%s] %s\n", level_str, message);
 }
 
 void frmwrk_setup_logging(WGPULogLevel level) {
@@ -125,11 +124,11 @@ WGPUBuffer frmwrk_device_create_buffer_init(
 }
 
 #define print_registry_report(report, prefix)                                \
-  printf("%snumAllocated=%zu\n", prefix, report.numAllocated);               \
-  printf("%snumKeptFromUser=%zu\n", prefix, report.numKeptFromUser);         \
-  printf("%snumReleasedFromUser=%zu\n", prefix, report.numReleasedFromUser); \
-  printf("%snumError=%zu\n", prefix, report.numError);                       \
-  printf("%selementSize=%zu\n", prefix, report.elementSize)
+  DEBUG("%snumAllocated=%zu", prefix, report.numAllocated);               \
+  DEBUG("%snumKeptFromUser=%zu", prefix, report.numKeptFromUser);         \
+  DEBUG("%snumReleasedFromUser=%zu", prefix, report.numReleasedFromUser); \
+  DEBUG("%snumError=%zu", prefix, report.numError);                       \
+  DEBUG("%selementSize=%zu", prefix, report.elementSize)
 
 #define print_hub_report(report, prefix)                                      \
   print_registry_report(report.adapters, prefix "adapter.");                  \
@@ -149,7 +148,7 @@ WGPUBuffer frmwrk_device_create_buffer_init(
   print_registry_report(report.samplers, prefix "samplers.")
 
 void frmwrk_print_global_report(WGPUGlobalReport report) {
-  printf("struct WGPUGlobalReport {\n");
+  DEBUG("struct WGPUGlobalReport {");
   print_registry_report(report.surfaces, "\tsurfaces.");
 
   switch (report.backendType) {
@@ -166,7 +165,7 @@ void frmwrk_print_global_report(WGPUGlobalReport report) {
       print_hub_report(report.gl, "\tgl.");
       break;
     default:
-      printf("[framework] frmwrk_print_global_report: invalid backend type: %d", report.backendType);
+      DEBUG("[framework] frmwrk_print_global_report: invalid backend type: %d", report.backendType);
   }
-  printf("}\n");
+  DEBUG("}");
 }

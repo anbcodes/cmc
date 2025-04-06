@@ -21,7 +21,7 @@ void destroy_buffer(const Buffer buffer) {
 }
 
 void print_buffer(Buffer buf) {
-  for (int i = 0; i < buf.len; i++) {
+  for (size_t i = 0; i < buf.len; i++) {
     printf("%02x ", buf.ptr[i]);
   }
 

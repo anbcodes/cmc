@@ -55,7 +55,7 @@ int world_add_chunk(World *world, Chunk *chunk) {
     }
   }
 
-  printf("No space for chunk\n");
+  FATAL("No space for chunk");
   assert(false);
   return -1;
 }
@@ -390,7 +390,6 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
           ivec3 biome_x = {floor(x[0] / 4), floor(x[1] / 4), floor(x[2] / 4)};
           int biome_index = section->biome_data[biome_x[0] + 4 * (biome_x[2] + 4 * biome_x[1])];
-          // printf("Biome index: %d\n", biome_index);
           BiomeInfo biome = biome_info[biome_index];
           if (info.grass) {
             // Don't set the grass color for the bottom of the block

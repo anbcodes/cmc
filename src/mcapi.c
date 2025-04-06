@@ -108,12 +108,12 @@ mcapiConnection *mcapi_create_connection(char *hostname, short port, char *uuid,
   /* Prepare sockaddr_in. */
   hostent = gethostbyname(server_hostname);
   if (hostent == NULL) {
-    fprintf(stderr, "error: gethostbyname(\"%s\")\n", server_hostname);
+    FATAL("gethostbyname(\"%s\")", server_hostname);
     exit(1);
   }
   in_addr = inet_addr(inet_ntoa(*(struct in_addr *)*(hostent->h_addr_list)));
   if (in_addr == (in_addr_t)-1) {
-    fprintf(stderr, "error: inet_addr(\"%s\")\n", *(hostent->h_addr_list));
+    FATAL("inet_addr(\"%s\")", *(hostent->h_addr_list));
     exit(1);
   }
   sockaddr_in.sin_addr.s_addr = in_addr;
@@ -141,6 +141,8 @@ mcapiConnection *mcapi_create_connection(char *hostname, short port, char *uuid,
 
   conn->compressor = libdeflate_alloc_compressor(6);
   conn->decompressor = libdeflate_alloc_decompressor();
+
+  INFO("Connected to %s:%d", hostname, port);
 
   return conn;
 }
@@ -352,7 +354,7 @@ void mcapi_send_play_pong(mcapiConnection *conn, mcapiPlayPongPacket packet) {
 }
 
 void mcapi_send_play_ping_request(mcapiConnection *conn, mcapiPingRequestPacket packet) {
-  DEBUG("Sending play ping request %ld\n", packet.id);
+  TRACE("Sending play ping request %ld", packet.id);
   reusable_buffer.cursor = 0;
   reusable_buffer.buf.len = 0;
 
@@ -847,11 +849,11 @@ void enable_encryption(mcapiConnection *conn, EncryptionRequestPacket encrypt_re
   // printf("Got here\n");
   fflush(stdout);
   if (decoder_ctx == NULL) {
-    printf("Error\n");
+    ERROR("Encryption Error");
     ERR_print_errors_fp(stderr);
   }
   Buffer pubkey = encrypt_req.publicKey;
-  printf("pubkey %p\n", encrypt_req.publicKey.ptr);
+  DEBUG("pubkey ptr = %p", encrypt_req.publicKey.ptr);
   if (1 != OSSL_DECODER_from_data(decoder_ctx, (const unsigned char **)&pubkey.ptr, &pubkey.len)) ERR_print_errors_fp(stderr);
 
   // Encrypt secret (https://www.openssl.org/docs/man3.0/man3/EVP_PKEY_encrypt.html)
@@ -975,11 +977,11 @@ void mcapi_poll(mcapiConnection *conn) {
         if (conn->state == MCAPI_STATE_LOGIN) {
           switch (type) {
             case PTYPE_LOGIN_CB_LOGIN_COMPRESSION:
-              printf("Enabling compression\n");
+              INFO("Enabling compression");
               conn->compression_threshold = read_set_compression_packet(&curr_packet).threshold;
               break;
             case PTYPE_LOGIN_CB_HELLO:
-              printf("Enabling encryption\n");
+              INFO("Enabling encryption");
               EncryptionRequestPacket encrypt_req = read_encryption_request_packet(&curr_packet);
               enable_encryption(conn, encrypt_req);
               break;
@@ -990,7 +992,7 @@ void mcapi_poll(mcapiConnection *conn) {
               destroy_login_success_packet(packet);
               break;
             default:
-              printf("Unknown login packet %02x (len %ld)\n", type, curr_packet.buf.len);
+              WARN("Unknown login packet %02x (len %ld)", type, curr_packet.buf.len);
               break;
           }
         } else if (conn->state == MCAPI_STATE_CONFIG) {
@@ -1009,7 +1011,7 @@ void mcapi_poll(mcapiConnection *conn) {
               destroy_registry_data_packet(registry_data_packet);
               break;
             default:
-              printf("Unknown config packet %02x (len %ld)\n", type, curr_packet.buf.len);
+              WARN("Unknown config packet %02x (len %ld)", type, curr_packet.buf.len);
               break;
           }
 
@@ -1049,7 +1051,7 @@ void mcapi_poll(mcapiConnection *conn) {
               if (conn->clientbound_keepalive_cb) (*conn->clientbound_keepalive_cb)(conn, ka_packet);
               break;
             case PTYPE_PLAY_CB_PING:
-              DEBUG("Got ping response!\n");
+              TRACE("Got ping response!");
               break;
             default:
               // printf("Unknown play packet %02x (len %ld)\n", type, curr_packet.buf.len);

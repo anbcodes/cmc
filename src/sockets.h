@@ -65,6 +65,7 @@
 
 /* Includes */
 
+#include "macros.h"
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -137,9 +138,9 @@ inline void sock_perror(const char *msg)
 {
 #ifdef _WIN32
   // TODO use Win32's awful message formatting functions
-  printf("%s: %ld\n", msg, WSAGetLastError());
+  ERROR("%s: %ld", msg, WSAGetLastError());
 #else
-  perror(msg);
+  ERROR("%s", msg);
 #endif /* _WIN32 */
 }
 
