@@ -2,9 +2,8 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdlib.h>
 
-#include "cglm/cglm.h"
+#include <cglm/cglm.h>
 #include "datatypes.h"
 
 typedef struct NBT NBT;

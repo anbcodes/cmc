@@ -3,9 +3,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <cglm/cglm.h>
+#include <wgpu.h>
 
 #include "cJSON.h"
-#include "cglm/cglm.h"
 #include "chunk.h"
 #include "datatypes.h"
 #include "framework.h"
@@ -13,7 +14,6 @@
 #include "macros.h"
 #include "mcapi.h"
 #include "nbt.h"
-#include "wgpu.h"
 
 #if defined(GLFW_EXPOSE_NATIVE_COCOA)
 #include <Foundation/Foundation.h>
@@ -326,8 +326,10 @@ mcapiBlockFace face_from_normal(vec3 normal) {
     return MCAPI_FACE_SOUTH;
   else if (normal[2] == -1)
     return MCAPI_FACE_NORTH;
-  else
-    perror("Invalid normal!");
+  else {
+    ERROR("Invalid normal!");
+    return 0;
+  }
 }
 
 static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int action, int mods) {
@@ -626,7 +628,8 @@ void int_to_rgb(int color, vec3 result) {
 }
 
 void on_registry(mcapiConnection *conn, mcapiRegistryDataPacket packet) {
-  if (strncmp(packet.id.ptr, "minecraft:worldgen/biome", packet.id.len) == 0) {
+  UNUSED(conn);
+  if (strncmp((char*)packet.id.ptr, "minecraft:worldgen/biome", packet.id.len) == 0) {
     unsigned int width;
     unsigned int height;
     unsigned char *grass = load_image("data/assets/minecraft/textures/colormap/grass.png", &width, &height);
@@ -762,7 +765,7 @@ void on_position(mcapiConnection *conn, mcapiSynchronizePlayerPositionPacket pac
   glm_vec3_cross(game.up, game.right, game.forward);
   glm_normalize(game.forward);
 
-  mcapi_send_confirm_teleportation(conn, (mcapiConfirmTeleportationPacket){teleport_id : packet.teleport_id});
+  mcapi_send_confirm_teleportation(conn, (mcapiConfirmTeleportationPacket){.teleport_id = packet.teleport_id});
 }
 
 void on_update_time(mcapiConnection *conn, mcapiUpdateTimePacket packet) {
@@ -777,6 +780,7 @@ void on_set_block_destroy_stage(mcapiConnection *conn, mcapiSetBlockDestroyStage
 }
 
 void on_chunk_batch_finished(mcapiConnection *conn, mcapiChunkBatchFinishedPacket packet) {
+  UNUSED(packet);
   TRACE("Chunk batch finished chunks=%d", packet.batch_size);
   mcapi_send_chunk_batch_received(conn, (mcapiChunkBatchReceivedPacket) { .chunks_per_tick = 0.1 });
 }
@@ -811,7 +815,7 @@ int add_file_texture_to_image_sub_opacity(const char *fname, unsigned char *text
       texture_sheet[j + 0] = rgba[i + 0];
       texture_sheet[j + 1] = rgba[i + 1];
       texture_sheet[j + 2] = rgba[i + 2];
-      texture_sheet[j + 3] = max(rgba[i + 3] - sub_opacity, 0);
+      texture_sheet[j + 3] = MAX(rgba[i + 3] - sub_opacity, 0);
     }
   }
 
@@ -847,7 +851,7 @@ void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char 
       .protocol_version = 770,
       // .protocol_version = 767,
       // .protocol_version = 769,
-      .server_addr = server_ip,
+      .server_addr = to_string(server_ip),
       .server_port = port,
       .next_state = 2,
     }

@@ -9,9 +9,9 @@
 size_t nbt_reader(void *_p, uint8_t *data, size_t size) {
   ReadableBuffer *p = _p;
 
-  int to_read = min(size, p->buf.len - p->cursor);
+  int to_read = MIN(size, p->buf.len - p->cursor);
 
-  DEBUG("c: cursor=%d, buflen=%ld, to_read=%d, reqsize=%ld", p->cursor, p->buf.len, to_read, size);
+  DEBUG("c: cursor=%lu, buflen=%ld, to_read=%d, reqsize=%ld", p->cursor, p->buf.len, to_read, size);
 
   for (int i = 0; i < to_read; i++) {
     data[i] = read_byte(p);
@@ -107,6 +107,10 @@ void read_nbt_value(ReadableBuffer *p, NBT *nbt, NBTTagType type) {
         nbt->long_array_value.data[i] = read_long(p);
       }
       break;
+    case NBT_END:
+      // This should never happen since read_nbt_into checks for type NBT_END
+      assert(false);
+      break;
   }
 }
 
@@ -143,7 +147,7 @@ NBT *nbt_get_compound_tag(NBT *nbt, char *name) {
     if (nbt->compound_value.children[i].name.len == 0) {
       continue;
     }
-    if (strncmp(nbt->compound_value.children[i].name.ptr, name, nbt->compound_value.children[i].name.len) == 0) {
+    if (strncmp((char*)nbt->compound_value.children[i].name.ptr, name, nbt->compound_value.children[i].name.len) == 0) {
       return nbt->compound_value.children + i;
     }
   }

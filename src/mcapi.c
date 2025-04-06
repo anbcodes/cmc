@@ -15,9 +15,11 @@
 #include <string.h>
 #include <sys/types.h>
 
-#include "cglm/cglm.h"
+#include <cglm/cglm.h>
+#include <libdeflate.h>
+
 #include "datatypes.h"
-#include "libdeflate.h"
+#include "framework.h"
 #include "macros.h"
 #include "nbt.h"
 #include "protocol.h"
@@ -25,21 +27,6 @@
 #include "packetTypes.h"
 
 #define ntohll(x) (((uint64_t)ntohl((x) & 0xFFFFFFFF) << 32) | ntohl((x) >> 32))
-
-/* --- Macros --- */
-#define max(a, b)           \
-  ({                        \
-    __typeof__(a) _a = (a); \
-    __typeof__(b) _b = (b); \
-    _a > _b ? _a : _b;      \
-  })
-
-#define min(a, b)           \
-  ({                        \
-    __typeof__(a) _a = (a); \
-    __typeof__(b) _b = (b); \
-    _a < _b ? _a : _b;      \
-  })
 
 /* --- Create connection --- */
 
@@ -82,12 +69,8 @@ mcapiConnection *mcapi_create_connection(char *hostname, short port, char *uuid,
   char protoname[] = "tcp";
   struct protoent *protoent;
   char *server_hostname = hostname;
-  char *user_input = NULL;
   in_addr_t in_addr;
-  in_addr_t server_addr;
   int sockfd;
-  size_t getline_buffer = 0;
-  ssize_t nbytes_read, i, user_input_len;
   struct hostent *hostent;
   /* This is the struct used by INet addresses. */
   struct sockaddr_in sockaddr_in;
@@ -176,7 +159,7 @@ void send_packet(mcapiConnection *conn, const Buffer packet) {
   Buffer encrypted = {};
 
   if (conn->compression_threshold > 0) {
-    if (packet.len < conn->compression_threshold) {
+    if (packet.len < (size_t)conn->compression_threshold) {
       write_varint(&header_buffer, packet.len + 1);
       write_varint(&header_buffer, 0);
       rest_of_packet = &packet;
@@ -286,6 +269,7 @@ void mcapi_send_acknowledge_finish_config(mcapiConnection *conn) {
 }
 
 void mcapi_send_serverbound_known_packs(mcapiConnection *conn, mcapiServerboundKnownPacksPacket packet) {
+  UNUSED(packet);
   reusable_buffer.cursor = 0;
   reusable_buffer.buf.len = 0;
 
@@ -916,7 +900,6 @@ ReadableBuffer readable = {
 
 void mcapi_poll(mcapiConnection *conn) {
   static ReadableBuffer curr_packet = {};
-  static Buffer to_process = {};
 
   int nbytes_read;
 
@@ -943,7 +926,7 @@ void mcapi_poll(mcapiConnection *conn) {
           }
         }
       } else if (curr_packet.cursor < curr_packet.buf.len) {
-        int nbytes_to_copy = min(readable.buf.len - readable.cursor, curr_packet.buf.len - curr_packet.cursor);
+        int nbytes_to_copy = MIN(readable.buf.len - readable.cursor, curr_packet.buf.len - curr_packet.cursor);
         memcpy(curr_packet.buf.ptr + curr_packet.cursor, readable.buf.ptr + readable.cursor, nbytes_to_copy);
 
         readable.cursor += nbytes_to_copy;

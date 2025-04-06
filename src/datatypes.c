@@ -41,7 +41,7 @@ void write_buffer_to_file(Buffer buf, const char* filename) {
 
 String to_string(char *c_str) {
   return (String){
-    .ptr = c_str,
+    .ptr = (unsigned char *)c_str,
     .len = strlen(c_str),
   };
 }
@@ -56,19 +56,19 @@ ResizeableBuffer create_resizeable_buffer() {
     .buffer = create_buffer(16),
     .len = 0,
   };
-};
+}
 
 void destroy_resizeable_buffer(const ResizeableBuffer buffer) {
   destroy_buffer(buffer.buffer);
 }
 
-void resizeable_buffer_ensure_capacity(ResizeableBuffer *buf, int capacity) {
+void resizeable_buffer_ensure_capacity(ResizeableBuffer *buf, size_t capacity) {
   if (buf->buffer.len < capacity) {
     // Double the size of the buffer
     Buffer old_buf = buf->buffer;
-    int oldlen = buf->buffer.len;
+    size_t oldlen = buf->buffer.len;
 
-    int newlen = oldlen * 2;
+    size_t newlen = oldlen * 2;
     while (newlen < capacity) {
       newlen *= 2;
     }

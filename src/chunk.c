@@ -1,7 +1,6 @@
 #include "chunk.h"
 
 #include <stdbool.h>
-#include <stdio.h>
 
 #include "framework.h"
 #include "macros.h"
@@ -90,9 +89,9 @@ void world_get_sky_color(World *world, vec3 position, BiomeInfo *biome_info, vec
   int y = positive_mod((int)floor(chunk_position[1]), CHUNK_SIZE);
   int z = (int)floor(chunk_position[2]);
   int s = (int)floor(chunk_position[1] / CHUNK_SIZE) + 4;
-  int biome_x = floor(x / 4);
-  int biome_z = floor(z / 4);
-  int biome_y = floor(y / 4);
+  int biome_x = floor(x / 4.0);
+  int biome_z = floor(z / 4.0);
+  int biome_y = floor(y / 4.0);
   int biome_index = chunk->sections[s].biome_data[biome_x + 4 * (biome_z + 4 * biome_y)];
   BiomeInfo biome = biome_info[biome_index];
   glm_vec3_copy(biome.sky_color, sky_color);
@@ -388,7 +387,7 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
 
           // Get the biome color
           vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
-          ivec3 biome_x = {floor(x[0] / 4), floor(x[1] / 4), floor(x[2] / 4)};
+          ivec3 biome_x = {floor(x[0] / 4.0), floor(x[1] / 4.0), floor(x[2] / 4.0)};
           int biome_index = section->biome_data[biome_x[0] + 4 * (biome_x[2] + 4 * biome_x[1])];
           BiomeInfo biome = biome_info[biome_index];
           if (info.grass) {

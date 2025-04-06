@@ -84,7 +84,6 @@ cleanup:
 }
 
 #define COPY_BUFFER_ALIGNMENT 4
-#define MAX(A, B) ((A) > (B) ? (A) : (B))
 
 WGPUBuffer frmwrk_device_create_buffer_init(
   WGPUDevice device, const frmwrk_buffer_init_descriptor *descriptor

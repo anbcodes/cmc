@@ -6,6 +6,8 @@ add_subdirectory(lib/libdeflate)
 add_subdirectory(lib/glfw)
 add_subdirectory(lib/cglm)
 
+set (CMAKE_C_STANDARD 23)
+
 add_executable(cmc src/main.c
   src/framework.c
   src/chunk.c
@@ -24,8 +26,9 @@ target_link_libraries(cmc PUBLIC libdeflate_static)
 target_link_libraries(cmc PUBLIC glfw)
 target_link_libraries(cmc PUBLIC cglm)
 
+target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
+
 target_include_directories(cmc PUBLIC "${CMAKE_SOURCE_DIR}/lib/libdeflate")
 target_include_directories(cmc PUBLIC "${CMAKE_SOURCE_DIR}/lib/glfw/include")
 target_include_directories(cmc PUBLIC "${CMAKE_SOURCE_DIR}/lib/cglm/include")
 target_include_directories(cmc PUBLIC "${CMAKE_SOURCE_DIR}/lib/wgpu")
-

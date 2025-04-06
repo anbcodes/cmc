@@ -2,9 +2,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "cglm/cglm.h"
+#include <cglm/cglm.h>
 #include "datatypes.h"
-#include "macros.h"
 
 /* --- Packet Reader/Writer Code --- */
 
@@ -112,7 +111,7 @@ void write_varlong(WritableBuffer *io, long value) {
 void write_string(WritableBuffer *io, String string) {
   write_varint(io, string.len);
   // TODO: Speed up by checking whole string length and adding it all at once
-  for (int i = 0; i < string.len; i++) {
+  for (size_t i = 0; i < string.len; i++) {
     write_byte(io, string.ptr[i]);
   }
 }
@@ -256,7 +255,7 @@ BitSet read_bitset(ReadableBuffer *io) {
   return bitset;
 }
 
-void *destroy_bitset(BitSet bs) {
+void destroy_bitset(BitSet bs) {
   free(bs.data);
 }
 

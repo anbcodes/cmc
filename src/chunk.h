@@ -1,5 +1,5 @@
-#include "cglm/cglm.h"
-#include "webgpu.h"
+#include <cglm/cglm.h>
+#include <wgpu.h>
 
 #define FLOATS_PER_VERTEX 14
 #define MAX_CHUNKS 1024
