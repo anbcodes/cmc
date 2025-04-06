@@ -4,6 +4,7 @@ core
 texture_sheet.png
 cmc
 build
+server
 .cache
 run-with-token*.sh
 callgrind*

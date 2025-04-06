@@ -15,13 +15,17 @@ If you are on debian linux run `./dev-setup.sh` and `./import-data.sh`.
 To build run
 - `mkdir build && cd build`
 - `cmake ..`
-- `cmake --build . -j8`
+- `cd ..`
+- `cmake --build build -j8`
 
 To run
 - Create a Minecraft profile and set a custom Java executable to the path of `custommc.sh`
 - Run that Minecraft profile which creates a file called `./run-with-token.sh`
 - Edit that file to change the server hostname and port.
 - Run `./run-with-token.sh`
+
+To run with a local server online mode turned off (the final two args are unused auth placeholders)
+- `./build/cmc <any-username> <host> <port> _ _`
 
 ### Generic instructions
 

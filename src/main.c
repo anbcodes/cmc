@@ -721,7 +721,7 @@ void on_light(mcapiConnection *conn, mcapiUpdateLightPacket packet) {
     printf("Chunk not loaded!\n");
     return;
   }
-  perror("In!\n");
+  // perror("In!\n");
   for (int i = 0; i < 24; i++) {
     memcpy(chunk->sections[i].sky_light, packet.sky_light_array[i + 1], 4096);
     memcpy(chunk->sections[i].block_light, packet.block_light_array[i + 1], 4096);
@@ -765,7 +765,7 @@ void on_position(mcapiConnection *conn, mcapiSynchronizePlayerPositionPacket pac
 
 void on_update_time(mcapiConnection *conn, mcapiUpdateTimePacket packet) {
   UNUSED(conn)
-  printf("World age: %ld, Time of day: %ld\n", packet.world_age, packet.time_of_day % 24000);
+  // printf("World age: %ld, Time of day: %ld\n", packet.world_age, packet.time_of_day % 24000);
   game.time_of_day = packet.time_of_day;
 }
 

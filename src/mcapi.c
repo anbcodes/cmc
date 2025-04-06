@@ -567,7 +567,7 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
 
   // Jump to after the heightmap
   p->cursor = 0x388;
-  printf("Got chunk x=%d z=%d\n", res.chunk_x, res.chunk_z);
+  // printf("Got chunk x=%d z=%d\n", res.chunk_x, res.chunk_z);
   int data_len = read_varint(p);
 
   int startp = p->cursor;
@@ -578,10 +578,10 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
     res.chunk_sections[i].block_count = read_short(p);
     {
       uint8_t bits_per_entry = read_byte(p);
-      DEBUG("bpe blocks = %d, ci = %d, p = %x\n", bits_per_entry, i, p->cursor);
+      // DEBUG("bpe blocks = %d, ci = %d, p = %x\n", bits_per_entry, i, p->cursor);
       if (bits_per_entry == 0) {
         int value = read_varint(p);
-        printf("palette_all = %d\n", value);
+        // printf("palette_all = %d\n", value);
 
         for (int j = 0; j < 4096; j++) {
           res.chunk_sections[i].blocks[j] = value;
@@ -594,12 +594,12 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
 
         for (int j = 0; j < palette_len; j++) {
           palette[j] = read_varint(p);
-          printf("palette[%d] = %d\n", j, palette[j]);
+          // printf("palette[%d] = %d\n", j, palette[j]);
         }
 
         // int compressed_blocks_len = read_varint(p);
         int compressed_blocks_len = calc_compressed_arr_len(4096, bits_per_entry);
-        DEBUG("compressed_blocks_len %d\n", compressed_blocks_len);
+        // DEBUG("compressed_blocks_len %d\n", compressed_blocks_len);
         read_compressed_long_arr(p, bits_per_entry, 4096, compressed_blocks_len, res.chunk_sections[i].blocks);
 
         for (int j = 0; j < 4096; j++) {
@@ -611,8 +611,8 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
       } else {
         // int compressed_blocks_len = read_varint(p);
         int compressed_blocks_len = calc_compressed_arr_len(4096, bits_per_entry);
-        DEBUG("compressed_blocks_len no palette %d\n", compressed_blocks_len);
-        printf("no_palette!!!!!!!!!!!!! %d %d\n", bits_per_entry, compressed_blocks_len);
+        // DEBUG("compressed_blocks_len no palette %d\n", compressed_blocks_len);
+        // printf("no_palette!!!!!!!!!!!!! %d %d\n", bits_per_entry, compressed_blocks_len);
         if (compressed_blocks_len < 10) {
           exit(1);
         }
@@ -624,7 +624,7 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
     // Read biomes
     {
       uint8_t bits_per_entry = read_byte(p);
-      DEBUG("bpe biomes = %d p = %x\n", bits_per_entry, p->cursor);
+      // DEBUG("bpe biomes = %d p = %x\n", bits_per_entry, p->cursor);
       if (bits_per_entry == 0) {
         int value = read_varint(p);
         for (int j = 0; j < 64; j++) {
@@ -654,14 +654,14 @@ mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *
     }
   }
 
-  DEBUG("data_len=%d data_read=%d\n", data_len, p->cursor - startp);
+  // DEBUG("data_len=%d data_read=%d\n", data_len, p->cursor - startp);
 
   p->cursor = startp + data_len;
 
   // Block entities
 
   res.block_entity_count = read_varint(p);
-  DEBUG("block_entity_count=%d\n", res.block_entity_count);
+  // DEBUG("block_entity_count=%d\n", res.block_entity_count);
   res.block_entities = malloc(sizeof(mcapiBlockEntity) * res.block_entity_count);
   for (int i = 0; i < res.block_entity_count; i++) {
     uint8_t xz = read_byte(p);
@@ -819,7 +819,7 @@ void enable_encryption(mcapiConnection *conn, EncryptionRequestPacket encrypt_re
 
     destroy_writable_buffer(hash_as_string);
 
-    printf("JSON\n%s\n", json.buf.buffer.ptr);
+    // printf("JSON\n%s\n", json.buf.buffer.ptr);
 
     CURL *curl;
     curl_global_init(CURL_GLOBAL_ALL);
@@ -844,7 +844,7 @@ void enable_encryption(mcapiConnection *conn, EncryptionRequestPacket encrypt_re
   // Decode the key
   EVP_PKEY *pkey = NULL;
   OSSL_DECODER_CTX *decoder_ctx = OSSL_DECODER_CTX_new_for_pkey(&pkey, "DER", NULL, "RSA", EVP_PKEY_PUBLIC_KEY, NULL, NULL);
-  printf("Got here\n");
+  // printf("Got here\n");
   fflush(stdout);
   if (decoder_ctx == NULL) {
     printf("Error\n");
@@ -1044,7 +1044,7 @@ void mcapi_poll(mcapiConnection *conn) {
               mcapiUpdateTimePacket time_packet = create_update_time_packet(&curr_packet);
               if (conn->update_time_cb) (*conn->update_time_cb)(conn, time_packet);
               break;
-            case PTYPE_CONFIGURATION_CB_KEEP_ALIVE:
+            case PTYPE_PLAY_CB_KEEP_ALIVE:
               mcapiClientboundKeepAlivePacket ka_packet = read_clientbound_keepalive_packet(&curr_packet);
               if (conn->clientbound_keepalive_cb) (*conn->clientbound_keepalive_cb)(conn, ka_packet);
               break;
