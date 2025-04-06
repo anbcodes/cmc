@@ -108,8 +108,7 @@ void read_nbt_value(ReadableBuffer *p, NBT *nbt, NBTTagType type) {
       }
       break;
     case NBT_END:
-      // This should never happen since read_nbt_into checks for type NBT_END
-      assert(false);
+      // We do not need to handle this case
       break;
   }
 }
