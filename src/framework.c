@@ -1,5 +1,6 @@
 #include "framework.h"
 #include "macros.h"
+#include "logging.h"
 
 static void log_callback(WGPULogLevel level, char const *message, void *userdata) {
   UNUSED(userdata)

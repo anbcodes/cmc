@@ -17,6 +17,7 @@ add_executable(cmc src/main.c
   src/datatypes.c
   src/protocol.c
   src/cJSON.c
+  src/logging.c
   src/lodepng/lodepng.c
 )
 target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)

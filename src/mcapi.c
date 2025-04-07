@@ -18,6 +18,7 @@
 #include <cglm/cglm.h>
 #include <libdeflate.h>
 
+#include "logging.h"
 #include "datatypes.h"
 #include "framework.h"
 #include "macros.h"

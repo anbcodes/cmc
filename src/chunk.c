@@ -3,7 +3,7 @@
 #include <stdbool.h>
 
 #include "framework.h"
-#include "macros.h"
+#include "logging.h"
 
 int positive_mod(int a, int b) {
   int result = a % b;

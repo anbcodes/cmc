@@ -6,6 +6,7 @@
 #include <cglm/cglm.h>
 #include <wgpu.h>
 
+#include "logging.h"
 #include "cJSON.h"
 #include "chunk.h"
 #include "datatypes.h"
@@ -593,9 +594,7 @@ void update_player_position(float dt) {
 
 void on_login_success(mcapiConnection *conn, mcapiLoginSuccessPacket packet) {
   INFO("Finished login");
-  INFO_NN("  Username: ");
-  print_string(packet.username);
-  printf("\n");
+  INFO("  Username: %sb", packet.username);
   INFO("  UUID: %016lx%016lx", packet.uuid.upper, packet.uuid.lower);
   INFO("  %d Properties:", packet.number_of_properties);
   for (int i = 0; i < packet.number_of_properties; i++) {

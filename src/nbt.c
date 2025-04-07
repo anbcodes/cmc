@@ -5,6 +5,7 @@
 #include "datatypes.h"
 #include "macros.h"
 #include "protocol.h"
+#include "logging.h"
 
 size_t nbt_reader(void *_p, uint8_t *data, size_t size) {
   ReadableBuffer *p = _p;
