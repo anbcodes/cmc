@@ -662,6 +662,22 @@ void on_registry(mcapiConnection *conn, mcapiRegistryDataPacket packet) {
         info.grass_color[1] = grass[index * 4 + 1] / 255.0f;
         info.grass_color[2] = grass[index * 4 + 2] / 255.0f;
       }
+      // https://minecraft.fandom.com/wiki/Color#Grass
+      NBT *grass_color_modifier = nbt_get_compound_tag(effects, "grass_color_modifier");
+      if (grass_color_modifier != NULL) {
+        String modifier = grass_color_modifier->string_value;
+        if (!strncmp((char*)modifier.ptr, "swamp", modifier.len)) {
+          info.swamp = true;
+          // Swamp temperature, which starts at 0.8, is not affected by altitude.
+          // Rather, a Perlin noise function is used to gradually vary the temperature of the swamp.
+          // When this temperature goes below −0.1, a lush green color is used (#4C763C);
+          // otherwise it is set to a sickly brown (#6A7039).
+          info.grass_color[0] = 0x6A / 255.0f;
+          info.grass_color[1] = 0x70 / 255.0f;
+          info.grass_color[2] = 0x39 / 255.0f;
+        }
+      }
+
       NBT *foliage_color = nbt_get_compound_tag(effects, "foliage_color");
       if (foliage_color != NULL) {
         info.custom_foliage_color = true;
@@ -671,6 +687,7 @@ void on_registry(mcapiConnection *conn, mcapiRegistryDataPacket packet) {
         info.foliage_color[1] = foliage[index * 4 + 1] / 255.0f;
         info.foliage_color[2] = foliage[index * 4 + 2] / 255.0f;
       }
+
       game.biome_info[i] = info;
       // print_string(packet.entry_names[i]);
       // printf(" %d: %d, temp %f downfall %f x %d y %d color %f %f %f\n", i, info.custom_grass_color, info.temperature, info.downfall, x_index, y_index, info.grass_color[0], info.grass_color[1], info.grass_color[2]);
@@ -1714,7 +1731,10 @@ void block_selected_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
   int ty = floor(game.block_selected_renderer.uniforms.position[1]);
   int tz = floor(game.block_selected_renderer.uniforms.position[2]);
   // DEBUG("Target block material %d location %d %d %d", material, tx, ty, tz)
+  // printf("name: ");
   // print_string(game.block_info[material].name);
+  // printf(" type: ");
+  // print_string(game.block_info[material].type);
   // printf("\n");
 
   if (game.block_breaking_start != 0 && (tx != game.block_breaking_position[0] || ty != game.block_breaking_position[1] || tz != game.block_breaking_position[2])) {
@@ -1763,10 +1783,14 @@ void load_block_models() {
 
     cJSON *definition = cJSON_GetObjectItemCaseSensitive(block, "definition");
     cJSON *type = cJSON_GetObjectItemCaseSensitive(definition, "type");
+    info.type = copy_buffer(to_string(type->valuestring));
     if (
       strcmp(type->valuestring, "minecraft:air") == 0 ||
       strcmp(type->valuestring, "minecraft:flower") == 0 ||
-      strcmp(type->valuestring, "minecraft:vine") == 0
+      strcmp(type->valuestring, "minecraft:vine") == 0 ||
+      strcmp(type->valuestring, "minecraft:dry_vegetation") == 0 ||
+      strcmp(type->valuestring, "minecraft:firefly_bush") == 0 ||
+      strcmp(type->valuestring, "minecraft:mushroom") == 0
     ) {
       info.passable = true;
       info.transparent = true;
@@ -1782,7 +1806,12 @@ void load_block_models() {
       info.transparent = true;
       info.grass = true;
     }
-    if (strcmp(type->valuestring, "minecraft:leaves") == 0) {
+    if (
+      strcmp(type->valuestring, "minecraft:leaves") == 0 ||
+      strcmp(type->valuestring, "minecraft:tinted_particle_leaves") == 0 ||
+      strcmp(type->valuestring, "minecraft:waterlily") == 0 ||
+      strcmp(type->valuestring, "minecraft:vine") == 0
+    ) {
       info.transparent = true;
       info.foliage = true;
     }

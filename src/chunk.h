@@ -13,6 +13,7 @@
 typedef struct BlockInfo {
   // The most common textures (and overlay for grass)
   String name;
+  String type;
   int16_t texture;
   int16_t texture_all;
   int16_t texture_top;
@@ -36,6 +37,7 @@ typedef struct BiomeInfo {
   vec3 water_color;
   vec3 water_fog_color;
   vec3 sky_color;
+  bool swamp;
   bool custom_grass_color;
   vec3 grass_color;
   bool custom_foliage_color;
