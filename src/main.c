@@ -1714,6 +1714,9 @@ void block_selected_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
   int tx = floor(game.block_selected_renderer.uniforms.position[0]);
   int ty = floor(game.block_selected_renderer.uniforms.position[1]);
   int tz = floor(game.block_selected_renderer.uniforms.position[2]);
+  // DEBUG("Target block material %d location %d %d %d", material, tx, ty, tz)
+  // print_string(game.block_info[material].name);
+  // printf("\n");
 
   if (game.block_breaking_start != 0 && (tx != game.block_breaking_position[0] || ty != game.block_breaking_position[1] || tz != game.block_breaking_position[2])) {
     mcapi_send_player_action(game.conn, (mcapiPlayerActionPacket){
@@ -1793,32 +1796,30 @@ void load_block_models() {
       cJSON_Delete(blockstate);
       continue;
     }
+
+    cJSON *model_parent = NULL;
     cJSON *multipart = cJSON_GetObjectItemCaseSensitive(blockstate, "multipart");
     if (multipart != NULL) {
-      INFO("skipping multipart for now: %s", block_name);
-      block = block->next;
-      cJSON_Delete(blockstate);
-      continue;
+      // Pick first random option for now
+      model_parent = multipart->child;
+      model_parent = cJSON_GetObjectItemCaseSensitive(model_parent, "apply");
     }
     cJSON *variants = cJSON_GetObjectItemCaseSensitive(blockstate, "variants");
-    if (variants == NULL) {
-      WARN("variants not found for %s", block_name);
+    if (variants != NULL) {
+      // Pick first random key/value for now
+      model_parent = variants->child;
+      if (model_parent->type == cJSON_Array) {
+        // Pick first random option for now
+        model_parent = model_parent->child;
+      }
+    }
+    if (model_parent == NULL) {
+      WARN("model parent not found for %s", block_name);
       block = block->next;
       cJSON_Delete(blockstate);
       continue;
     }
-    cJSON *variant = variants->child;
-    if (variant == NULL) {
-      WARN("variant not found for %s", block_name);
-      block = block->next;
-      cJSON_Delete(blockstate);
-      continue;
-    }
-    if (variant->type == cJSON_Array) {
-      // Pick first random option for now
-      variant = variant->child;
-    }
-    cJSON *model_name = cJSON_GetObjectItemCaseSensitive(variant, "model");
+    cJSON *model_name = cJSON_GetObjectItemCaseSensitive(model_parent, "model");
     if (model_name == NULL) {
       WARN("model not found for %s", block_name);
       block = block->next;
@@ -1830,6 +1831,8 @@ void load_block_models() {
       model_name_str += 10;
     }
     snprintf(fname, 1000, "data/assets/minecraft/models/%s.json", model_name_str);
+    // info.name = copy_buffer(to_string(model_name_str));
+    info.name = copy_buffer(to_string(block_name));
     cJSON_Delete(blockstate);
     cJSON *model = load_json(fname);
     if (model == NULL) {

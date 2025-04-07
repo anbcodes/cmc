@@ -20,6 +20,12 @@ void destroy_buffer(const Buffer buffer) {
   free(buffer.ptr);
 }
 
+Buffer copy_buffer(Buffer buffer) {
+  Buffer b = create_buffer(buffer.len);
+  memcpy(b.ptr, buffer.ptr, b.len);
+  return b;
+}
+
 void print_buffer(Buffer buf) {
   for (size_t i = 0; i < buf.len; i++) {
     printf("%02x ", buf.ptr[i]);

@@ -1,5 +1,6 @@
 #include <cglm/cglm.h>
 #include <wgpu.h>
+#include "datatypes.h"
 
 #define FLOATS_PER_VERTEX 14
 #define MAX_CHUNKS 1024
@@ -11,6 +12,7 @@
 
 typedef struct BlockInfo {
   // The most common textures (and overlay for grass)
+  String name;
   int16_t texture;
   int16_t texture_all;
   int16_t texture_top;

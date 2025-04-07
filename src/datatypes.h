@@ -11,6 +11,7 @@ typedef struct Buffer {
 
 Buffer create_buffer(size_t len);
 void destroy_buffer(Buffer buffer);
+Buffer copy_buffer(Buffer buffer);
 void print_buffer(Buffer str);
 
 typedef Buffer String;
