@@ -219,153 +219,6 @@ MCAPI_HANDLER(play, PTYPE_PLAY_CB_LEVEL_CHUNK_WITH_LIGHT, chunk_and_light_data, 
   packet->block_entities = NULL;
 }))
 
-// MCAPI_SETCB_FUNC(chunk_and_light_data, mcapiChunkAndLightDataPacket)
-// mcapiChunkAndLightDataPacket create_chunk_and_light_data_packet(ReadableBuffer *p) {
-//   mcapiChunkAndLightDataPacket res = {};
-
-//   write_buffer_to_file(p->buf, "tmp.bin");
-
-//   res.chunk_x = read_int(p);
-//   res.chunk_z = read_int(p);
-
-//   // Read the heightmap
-//   res.heightmap_count = read_varint(p);
-//   res.heightmaps = malloc(res.heightmap_count * sizeof(mcapiHeightmap));
-//   for (int i = 0; i < res.heightmap_count; i++) {
-//     // Likely the type but not sure
-//     res.heightmaps[i].type = read_short(p);
-
-//     int longarrlen = calc_compressed_arr_len(16*16, 9);
-//     read_compressed_long_arr(p, 9, 16*16, longarrlen, res.heightmaps[i].data);
-//   }
-
-//   // Jump to after the heightmap
-//   p->cursor = 0x388;
-//   // printf("Got chunk x=%d z=%d\n", res.chunk_x, res.chunk_z);
-//   int data_len = read_varint(p);
-
-//   int startp = p->cursor;
-
-//   res.chunk_section_count = 24;
-//   res.chunk_sections = calloc(24, sizeof(mcapiChunkSection));
-//   for (int i = 0; i < 24; i++) {
-//     res.chunk_sections[i].block_count = read_short(p);
-//     {
-//       uint8_t bits_per_entry = read_byte(p);
-//       // DEBUG("bpe blocks = %d, ci = %d, p = %x\n", bits_per_entry, i, p->cursor);
-//       if (bits_per_entry == 0) {
-//         int value = read_varint(p);
-//         // printf("palette_all = %d\n", value);
-
-//         for (int j = 0; j < 4096; j++) {
-//           res.chunk_sections[i].blocks[j] = value;
-//         }
-
-//         // read_varint(p);  // Read the length of the data array (always 0)
-//       } else if (bits_per_entry <= 8) {
-//         int palette_len = read_varint(p);
-//         int palette[palette_len];
-
-//         for (int j = 0; j < palette_len; j++) {
-//           palette[j] = read_varint(p);
-//           // printf("palette[%d] = %d\n", j, palette[j]);
-//         }
-
-//         // int compressed_blocks_len = read_varint(p);
-//         int compressed_blocks_len = calc_compressed_arr_len(4096, bits_per_entry);
-//         // DEBUG("compressed_blocks_len %d\n", compressed_blocks_len);
-//         read_compressed_long_arr(p, bits_per_entry, 4096, compressed_blocks_len, res.chunk_sections[i].blocks);
-
-//         for (int j = 0; j < 4096; j++) {
-//           // if (palette[res.chunk_sections[i].blocks[j]] == 0) {
-//           res.chunk_sections[i].blocks[j] = palette[res.chunk_sections[i].blocks[j]];
-//           // }
-//         }
-
-//       } else {
-//         // int compressed_blocks_len = read_varint(p);
-//         int compressed_blocks_len = calc_compressed_arr_len(4096, bits_per_entry);
-//         // DEBUG("compressed_blocks_len no palette %d\n", compressed_blocks_len);
-//         // printf("no_palette!!!!!!!!!!!!! %d %d\n", bits_per_entry, compressed_blocks_len);
-//         if (compressed_blocks_len < 10) {
-//           exit(1);
-//         }
-
-//         read_compressed_long_arr(p, bits_per_entry, 4096, compressed_blocks_len, res.chunk_sections[i].blocks);
-//       }
-//     }
-
-//     // Read biomes
-//     {
-//       uint8_t bits_per_entry = read_byte(p);
-//       // DEBUG("bpe biomes = %d p = %x\n", bits_per_entry, p->cursor);
-//       if (bits_per_entry == 0) {
-//         int value = read_varint(p);
-//         for (int j = 0; j < 64; j++) {
-//           res.chunk_sections[i].biomes[j] = value;
-//         }
-//       } else if (bits_per_entry <= 3) {
-//         int palette_len = read_varint(p);
-//         int palette[palette_len];
-
-//         for (int j = 0; j < palette_len; j++) {
-//           palette[j] = read_varint(p);
-//         }
-
-//         // int compressed_biomes_len = read_varint(p);
-//         int compressed_biomes_len = calc_compressed_arr_len(64, bits_per_entry);
-
-//         read_compressed_long_arr(p, bits_per_entry, 64, compressed_biomes_len, res.chunk_sections[i].biomes);
-
-//         for (int j = 0; j < 64; j++) {
-//           res.chunk_sections[i].biomes[j] = palette[res.chunk_sections[i].biomes[j]];
-//         }
-//       } else {
-//         // int compressed_biomes_len = read_varint(p);
-//         int compressed_biomes_len = calc_compressed_arr_len(64, bits_per_entry);
-//         read_compressed_long_arr(p, bits_per_entry, 64, compressed_biomes_len, res.chunk_sections[i].biomes);
-//       }
-//     }
-//   }
-
-//   // DEBUG("data_len=%d data_read=%d\n", data_len, p->cursor - startp);
-
-//   p->cursor = startp + data_len;
-
-//   // Block entities
-
-//   res.block_entity_count = read_varint(p);
-//   // DEBUG("block_entity_count=%d\n", res.block_entity_count);
-//   res.block_entities = malloc(sizeof(mcapiBlockEntity) * res.block_entity_count);
-//   for (int i = 0; i < res.block_entity_count; i++) {
-//     uint8_t xz = read_byte(p);
-//     res.block_entities[i].x = xz >> 4;
-//     res.block_entities[i].z = xz & 0x0F;
-//     res.block_entities[i].y = read_short(p);
-//     res.block_entities[i].type = read_varint(p);
-//     res.block_entities[i].data = read_nbt(p);
-//   }
-
-
-//   // Sky and block lights
-//   read_light_data_from_packet(p, res.block_light_array, res.sky_light_array);
-
-//   return res;
-// }
-
-// void destroy_chunk_and_light_data_packet(mcapiChunkAndLightDataPacket p) {
-//   free(p.heightmaps);
-//   p.heightmaps = NULL;
-//   free(p.chunk_sections);
-//   p.chunk_sections = NULL;
-//   for (int i = 0; i < p.block_entity_count; i++) {
-//     destroy_nbt(p.block_entities[i].data);
-//     p.block_entities[i].data = NULL;
-//   }
-//   free(p.block_entities);
-//   p.block_entities = NULL;
-// }
-
 MCAPI_HANDLER(play, PTYPE_PLAY_CB_LIGHT_UPDATE, update_light, mcapiUpdateLightPacket, ({
   packet->chunk_x = read_varint(p);
   packet->chunk_z = read_varint(p);
@@ -375,30 +228,12 @@ MCAPI_HANDLER(play, PTYPE_PLAY_CB_LIGHT_UPDATE, update_light, mcapiUpdateLightPa
   // No frees needed
 }))
 
-// MCAPI_SETCB_FUNC(update_light, mcapiUpdateLightPacket)
-// mcapiUpdateLightPacket read_update_light_packet(ReadableBuffer *p) {
-//   mcapiUpdateLightPacket res = {};
-//   res.chunk_x = read_varint(p);
-//   res.chunk_z = read_varint(p);
-
-//   read_light_data_from_packet(p, res.block_light_array, res.sky_light_array);
-//   return res;
-// }
-
 MCAPI_HANDLER(play, PTYPE_PLAY_CB_CHUNK_BATCH_FINISHED, chunk_batch_finished, mcapiChunkBatchFinishedPacket, ({
   packet->batch_size = read_varint(p);
 }), ({
   // No frees needed
 }))
 
-// MCAPI_SETCB_FUNC(chunk_batch_finished, mcapiChunkBatchFinishedPacket)
-// mcapiChunkBatchFinishedPacket read_chunk_batch_finished_packet(ReadableBuffer *p) {
-//   mcapiChunkBatchFinishedPacket res = {};
-
-//   res.batch_size = read_varint(p);
-
-//   return res;
-// }
 
 MCAPI_HANDLER(play, PTYPE_PLAY_CB_BLOCK_UPDATE, block_update, mcapiBlockUpdatePacket, ({
   read_ipos_into(p, packet->position);
@@ -406,11 +241,3 @@ MCAPI_HANDLER(play, PTYPE_PLAY_CB_BLOCK_UPDATE, block_update, mcapiBlockUpdatePa
 }), ({
   // No free needed
 }))
-
-// MCAPI_SETCB_FUNC(block_update, mcapiBlockUpdatePacket)
-// mcapiBlockUpdatePacket read_block_update_packet(ReadableBuffer *p) {
-//   mcapiBlockUpdatePacket res = {};
-//   read_ipos_into(p, res.position);
-//   res.block_id = read_varint(p);
-//   return res;
-// }

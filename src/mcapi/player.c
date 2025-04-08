@@ -59,22 +59,6 @@ MCAPI_HANDLER(play, PTYPE_PLAY_CB_PLAYER_POSITION, synchronize_player_position, 
   // No frees needed
 }))
 
-// MCAPI_SETCB_FUNC(synchronize_player_position, mcapiSynchronizePlayerPositionPacket)
-// mcapiSynchronizePlayerPositionPacket create_synchronize_player_position_data_packet(ReadableBuffer *p) {
-//   mcapiSynchronizePlayerPositionPacket res = {};
-//   res.teleport_id = read_varint(p);
-//   res.x = read_double(p);
-//   res.y = read_double(p);
-//   res.z = read_double(p);
-//   res.vx = read_double(p);
-//   res.vy = read_double(p);
-//   res.vz = read_double(p);
-//   res.yaw = read_float(p);
-//   res.pitch = read_float(p);
-//   res.flags = read_byte(p);
-//   return res;
-// }
-
 MCAPI_HANDLER(play, PTYPE_PLAY_CB_BLOCK_DESTRUCTION, set_block_destroy_stage, mcapiSetBlockDestroyStagePacket, ({
   packet->entity_id = read_varint(p);
   read_ipos_into(p, packet->position);
@@ -82,12 +66,3 @@ MCAPI_HANDLER(play, PTYPE_PLAY_CB_BLOCK_DESTRUCTION, set_block_destroy_stage, mc
 }), ({
   // No specific frees needed
 }))
-
-// MCAPI_SETCB_FUNC(set_block_destroy_stage, mcapiSetBlockDestroyStagePacket)
-// mcapiSetBlockDestroyStagePacket read_set_block_destroy_stage_packet(ReadableBuffer *p) {
-//   mcapiSetBlockDestroyStagePacket res = {};
-//   res.entity_id = read_varint(p);
-//   read_ipos_into(p, res.position);
-//   res.stage = read_byte(p);
-//   return res;
-// }

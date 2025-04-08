@@ -13,13 +13,34 @@
 
 #define ntohll(x) (((uint64_t)ntohl((x) & 0xFFFFFFFF) << 32) | ntohl((x) >> 32))
 
-#define MCAPI_SETCB_FUNC(state, type)                                                \
-  void mcapi_set_##name##_cb(mcapiConnection *conn, void (*cb)(mcapiConnection *, type)) { \
-    conn->name##_cb = cb;                                                                    \
-  } \
 
 #define UNPACK(...) __VA_ARGS__
 
+/* Used to define and register a callback handler for mcapi calls
+
+* state - either login, config or play
+* packet_id - the numeric ID of the packet
+* name - the name to give the set callback function set_[name]_cb
+* type - the packet struct type
+* create_body - the packet parsing code, use "packet" to reference the new packet (remember to put parenthesis around the code)
+* destroy_body - the packet freeing code, remember to put parenthesis around the code like ({ code })
+
+Example:
+MCAPI_HANDLER(play, PTYPE_PLAY_CB_PLAYER_POSITION, synchronize_player_position, mcapiSynchronizePlayerPositionPacket, ({
+  packet->teleport_id = read_varint(p);
+  packet->x = read_double(p);
+  packet->y = read_double(p);
+  packet->z = read_double(p);
+  packet->vx = read_double(p);
+  packet->vy = read_double(p);
+  packet->vz = read_double(p);
+  packet->yaw = read_float(p);
+  packet->pitch = read_float(p);
+  packet->flags = read_byte(p);
+}), ({
+  // No frees needed
+}))
+*/
 #define MCAPI_HANDLER(state, packet_id, name, type, create_body, destroy_body)                \
     mcapiPacket* create_##name##_packet(ReadableBuffer *p) {                               \
       type* packet = malloc(sizeof(type));\
@@ -43,21 +64,6 @@
   void mcapi_set_##name##_cb(mcapiConnection *conn, void (*cb)(mcapiConnection *, void *)) { \
     conn->state##_cbs[packet_id] = (Callback)cb;                                                    \
   }
-
-#define MCAPI_SETCB_FUNC1(name)                                                      \
-  void mcapi_set_##name##_cb(mcapiConnection *conn, void (*cb)(mcapiConnection *)) { \
-    conn->name##_cb = cb;                                                            \
-  }
-
-// #define MCAPI_HANDLER(state, packet, name, type, ...)\
-//   type * create_##name##_packet(ReadableBuffer *p) {\
-//     __VA_ARGS__\
-//   \
-//   void mcapi_set_##name##_cb(mcapiConnection *conn, void (*cb)(mcapiConnection *, packet)) { \
-//     conn->state##_cbs[type] = cb;                                                                    \
-//   }\
-//   PACKET_FUNCTIONS.state##create_funcs[type] = create_##name##_packet; \
-//   PACKET_FUNCTIONS.state##destroy_funcs[type] = create_##name##_packet;
 
 #define INTERNAL_BUF_SIZE 1024 * 1024
 

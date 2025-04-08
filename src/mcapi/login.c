@@ -71,17 +71,6 @@ MCAPI_HANDLER(login, PTYPE_LOGIN_CB_HELLO, encryption_request, mcapiEncryptionRe
   // Nothing special to free
 }))
 
-// EncryptionRequestPacket read_encryption_request_packet(ReadableBuffer *p) {
-//   EncryptionRequestPacket res = {};
-//   res.serverId = read_string(p);
-//   int publen = read_varint(p);
-//   res.publicKey = read_bytes(p, publen);
-//   int verifylen = read_varint(p);
-//   res.verifyToken = read_bytes(p, verifylen);
-//   res.shouldAuthenticate = read_byte(p);
-//   return res;
-// }
-
 MCAPI_HANDLER(login, PTYPE_LOGIN_CB_LOGIN_FINISHED, login_success, mcapiLoginSuccessPacket, ({
   packet->uuid = read_uuid(p);
   packet->username = read_string(p);
@@ -104,35 +93,3 @@ MCAPI_HANDLER(login, PTYPE_LOGIN_CB_LOGIN_FINISHED, login_success, mcapiLoginSuc
 }), ({
   free(packet->properties);
 }))
-
-// mcapiPacket* create_login_success_packet(ReadableBuffer *p) {
-//   mcapiLoginSuccessPacket* res = malloc(sizeof(mcapiLoginSuccessPacket));
-//   packet->uuid = read_uuid(p);
-//   res->username = read_string(p);
-//   res->number_of_properties = read_varint(p);
-//   res->properties = malloc(sizeof(mcapiLoginSuccessProperty) * res->number_of_properties);
-
-//   for (int i = 0; i < res->number_of_properties; i++) {
-//     res->properties[i] = (mcapiLoginSuccessProperty){
-//       .name = read_string(p),
-//       .value = read_string(p),
-//       .isSigned = read_byte(p),
-//     };
-
-//     if (res->properties[i].isSigned) {
-//       res->properties[i].signature = read_string(p);
-//     }
-//   }
-
-//   res->strict_error_handling = read_byte(p);
-
-//   return (mcapiPacket*)res;
-// }
-
-// void destroy_login_success_packet(mcapiPacket* _p) {
-//   mcapiLoginSuccessPacket *p = (mcapiLoginSuccessPacket *)_p;
-//   free(p->properties);
-//   free(p);
-// }
-
-// MCAPI_SETCB_FUNC(login, PTYPE_LOGIN_CB_LOGIN_FINISHED, login_success, mcapiLoginSuccessPacket)

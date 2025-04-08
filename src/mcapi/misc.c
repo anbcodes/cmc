@@ -44,23 +44,8 @@ MCAPI_HANDLER(play, PTYPE_PLAY_CB_SET_TIME, update_time, mcapiUpdateTimePacket, 
   // No specific frees needed
 }))
 
-// MCAPI_SETCB_FUNC(update_time, mcapiUpdateTimePacket)
-// mcapiUpdateTimePacket create_update_time_packet(ReadableBuffer *p) {
-//   mcapiUpdateTimePacket res = {};
-//   res.world_age = read_long(p);
-//   res.time_of_day = read_long(p);
-//   return res;
-// }
-
 MCAPI_HANDLER(play, PTYPE_PLAY_CB_KEEP_ALIVE, clientbound_keepalive, mcapiClientboundKeepAlivePacket, ({
   packet->keep_alive_id = read_long(p);
 }), ({
   // No specific frees needed
 }))
-
-// MCAPI_SETCB_FUNC(clientbound_keepalive, mcapiClientboundKeepAlivePacket)
-// mcapiClientboundKeepAlivePacket read_clientbound_keepalive_packet(ReadableBuffer *p) {
-//   mcapiClientboundKeepAlivePacket res = {};
-//   res.keep_alive_id = read_long(p);
-//   return res;
-// }
