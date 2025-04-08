@@ -363,7 +363,7 @@ void mcapi_poll(mcapiConnection *conn) {
               conn->play_cbs[type](conn, NULL);
             }
           } else {
-            WARN("Unknown play packet %02x (len %ld)", type, curr_packet.buf.len);
+            // WARN("Unknown play packet %02x (len %ld)", type, curr_packet.buf.len);
           }
         }
 

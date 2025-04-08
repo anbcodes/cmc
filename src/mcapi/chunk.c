@@ -1,5 +1,6 @@
 #include "chunk.h"
 #include <string.h>
+#include <assert.h>
 #include "base.h"
 #include "internal.h"
 #include "packetTypes.h"

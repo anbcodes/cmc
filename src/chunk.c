@@ -1,6 +1,7 @@
 #include "chunk.h"
 
 #include <stdbool.h>
+#include <assert.h>
 
 #include "framework.h"
 #include "logging.h"
