@@ -12,13 +12,20 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_executable(cmc src/main.c
   src/framework.c
   src/chunk.c
-  src/mcapi.c
+#  src/mcapi.c
   src/nbt.c
   src/datatypes.c
-  src/protocol.c
   src/cJSON.c
   src/logging.c
   src/lodepng/lodepng.c
+  src/mcapi/base.c
+  src/mcapi/chunk.c
+  src/mcapi/config.c
+  src/mcapi/internal.c
+  src/mcapi/login.c
+  src/mcapi/misc.c
+  src/mcapi/player.c
+  src/mcapi/protocol.c
 )
 target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
 

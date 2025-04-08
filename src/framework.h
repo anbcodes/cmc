@@ -9,8 +9,6 @@
 
 #include "wgpu.h"
 
-#define UNUSED(x) (void)x;
-
 typedef struct frmwrk_buffer_init_descriptor {
   WGPU_NULLABLE char const *label;
   WGPUBufferUsageFlags usage;

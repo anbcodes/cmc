@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdio.h> // IWYU pragma: keep
+
 void aprintf(const char* fmt, ...);
 
 

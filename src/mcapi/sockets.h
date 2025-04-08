@@ -65,7 +65,7 @@
 
 /* Includes */
 
-#include "macros.h"
+#include "../logging.h"
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -89,7 +89,6 @@
 #include <unistd.h>
 #endif /* _WIN32 */
 
-#include <stdio.h>
 #include <stdint.h>
 #include <fcntl.h>
 

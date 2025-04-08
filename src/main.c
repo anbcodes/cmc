@@ -13,7 +13,7 @@
 #include "framework.h"
 #include "lodepng/lodepng.h"
 #include "macros.h"
-#include "mcapi.h"
+#include "mcapi/mcapi.h"
 #include "nbt.h"
 
 #if defined(GLFW_EXPOSE_NATIVE_COCOA)
@@ -219,9 +219,8 @@ cJSON *load_json(const char *filename) {
 static void handle_request_adapter(
   WGPURequestAdapterStatus status,
   WGPUAdapter adapter, char const *message,
-  void *userdata
+  void *UNUSED(userdata)
 ) {
-  UNUSED(userdata)
   if (status == WGPURequestAdapterStatus_Success) {
     game.adapter = adapter;
   } else {
@@ -231,9 +230,8 @@ static void handle_request_adapter(
 static void handle_request_device(
   WGPURequestDeviceStatus status,
   WGPUDevice device, char const *message,
-  void *userdata
+  void *UNUSED(userdata)
 ) {
-  UNUSED(userdata)
   if (status == WGPURequestDeviceStatus_Success) {
     game.device = device;
   } else {
@@ -241,11 +239,9 @@ static void handle_request_device(
   }
 }
 static void handle_glfw_key(
-  GLFWwindow *window, int key, int scancode,
-  int action, int mods
+  GLFWwindow *window, int key, int UNUSED(scancode),
+  int action, int UNUSED(mods)
 ) {
-  UNUSED(scancode)
-  UNUSED(mods)
   if (!game.instance) return;
 
   switch (action) {
@@ -281,8 +277,7 @@ void update_window_size(int width, int height) {
   game.depth_texture = wgpuDeviceCreateTexture(game.device, &game.depth_texture_descriptor);
 }
 
-static void handle_glfw_framebuffer_size(GLFWwindow *window, int width, int height) {
-  UNUSED(window)
+static void handle_glfw_framebuffer_size(GLFWwindow *UNUSED(window), int width, int height) {
   if (width == 0 && height == 0) {
     return;
   }
@@ -290,8 +285,7 @@ static void handle_glfw_framebuffer_size(GLFWwindow *window, int width, int heig
   update_window_size(width, height);
 }
 
-static void handle_glfw_cursor_pos(GLFWwindow *window, double xpos, double ypos) {
-  UNUSED(window)
+static void handle_glfw_cursor_pos(GLFWwindow *UNUSED(window), double xpos, double ypos) {
   vec2 current = {xpos, ypos};
   if (!game.mouse_captured) {
     glm_vec2_copy(current, game.last_mouse);
@@ -333,9 +327,7 @@ mcapiBlockFace face_from_normal(vec3 normal) {
   }
 }
 
-static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int action, int mods) {
-  UNUSED(mods)
-
+static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int action, int UNUSED(mods)) {
   switch (action) {
     case GLFW_PRESS:
       if (!game.mouse_captured) {
@@ -392,10 +384,7 @@ static void handle_glfw_set_mouse_button(GLFWwindow *window, int button, int act
   }
 }
 
-static void handle_glfw_set_scroll(GLFWwindow *window, double xoffset, double yoffset) {
-  UNUSED(window)
-  UNUSED(xoffset)
-  UNUSED(yoffset)
+static void handle_glfw_set_scroll(GLFWwindow *UNUSED(window), double UNUSED(xoffset), double UNUSED(yoffset)) {
 }
 
 void game_update_player_y(float delta) {
@@ -592,16 +581,16 @@ void update_player_position(float dt) {
   }
 }
 
-void on_login_success(mcapiConnection *conn, mcapiLoginSuccessPacket packet) {
+void on_login_success(mcapiConnection *conn, mcapiLoginSuccessPacket *packet) {
   INFO("Finished login");
-  INFO("  Username: %sb", packet.username);
-  INFO("  UUID: %016lx%016lx", packet.uuid.upper, packet.uuid.lower);
-  INFO("  %d Properties:", packet.number_of_properties);
-  for (int i = 0; i < packet.number_of_properties; i++) {
+  INFO("  Username: %sb", packet->username);
+  INFO("  UUID: %016lx%016lx", packet->uuid.upper, packet->uuid.lower);
+  INFO("  %d Properties:", packet->number_of_properties);
+  for (int i = 0; i < packet->number_of_properties; i++) {
     INFO_NN("    ");
-    print_string(packet.properties[i].name);
+    print_string(packet->properties[i].name);
     printf(": ");
-    print_string(packet.properties[i].value);
+    print_string(packet->properties[i].value);
     printf("\n");
   }
 
@@ -610,8 +599,7 @@ void on_login_success(mcapiConnection *conn, mcapiLoginSuccessPacket packet) {
   mcapi_set_state(conn, MCAPI_STATE_CONFIG);
 }
 
-void on_known_packs(mcapiConnection *conn, mcapiClientboundKnownPacksPacket packet) {
-  UNUSED(packet)
+void on_known_packs(mcapiConnection *conn, mcapiClientboundKnownPacksPacket* UNUSED(packet)) {
   mcapi_send_serverbound_known_packs(conn, (mcapiServerboundKnownPacksPacket){});
 }
 
@@ -626,9 +614,8 @@ void int_to_rgb(int color, vec3 result) {
   );
 }
 
-void on_registry(mcapiConnection *conn, mcapiRegistryDataPacket packet) {
-  UNUSED(conn);
-  if (strncmp((char*)packet.id.ptr, "minecraft:worldgen/biome", packet.id.len) == 0) {
+void on_registry(mcapiConnection *UNUSED(conn), mcapiRegistryDataPacket *packet) {
+  if (strncmp((char*)packet->id.ptr, "minecraft:worldgen/biome", packet->id.len) == 0) {
     unsigned int width;
     unsigned int height;
     unsigned char *grass = load_image("data/assets/minecraft/textures/colormap/grass.png", &width, &height);
@@ -637,11 +624,11 @@ void on_registry(mcapiConnection *conn, mcapiRegistryDataPacket packet) {
     unsigned char *foliage = load_image("data/assets/minecraft/textures/colormap/foliage.png", &width, &height);
     assert(width == 256);
     assert(height == 256);
-    for (int i = 0; i < packet.entry_count; i++) {
+    for (int i = 0; i < packet->entry_count; i++) {
       BiomeInfo info = {0};
-      info.temperature = nbt_get_compound_tag(packet.entries[i], "temperature")->float_value;
-      info.downfall = nbt_get_compound_tag(packet.entries[i], "downfall")->float_value;
-      NBT *effects = nbt_get_compound_tag(packet.entries[i], "effects");
+      info.temperature = nbt_get_compound_tag(packet->entries[i], "temperature")->float_value;
+      info.downfall = nbt_get_compound_tag(packet->entries[i], "downfall")->float_value;
+      NBT *effects = nbt_get_compound_tag(packet->entries[i], "effects");
       int_to_rgb(nbt_get_compound_tag(effects, "fog_color")->int_value, info.fog_color);
       int_to_rgb(nbt_get_compound_tag(effects, "water_color")->int_value, info.water_color);
       int_to_rgb(nbt_get_compound_tag(effects, "water_fog_color")->int_value, info.water_fog_color);
@@ -689,7 +676,7 @@ void on_registry(mcapiConnection *conn, mcapiRegistryDataPacket packet) {
       }
 
       game.biome_info[i] = info;
-      // print_string(packet.entry_names[i]);
+      // print_string(packet->entry_names[i]);
       // printf(" %d: %d, temp %f downfall %f x %d y %d color %f %f %f\n", i, info.custom_grass_color, info.temperature, info.downfall, x_index, y_index, info.grass_color[0], info.grass_color[1], info.grass_color[2]);
       // printf("grass %x %x %x\n", grass[index * 4 + 0], grass[index * 4 + 1], grass[index * 4 + 2]);
       // printf("foliage %x %x %x\n", foliage[index * 4 + 0], foliage[index * 4 + 1], foliage[index * 4 + 2]);
@@ -699,7 +686,7 @@ void on_registry(mcapiConnection *conn, mcapiRegistryDataPacket packet) {
   }
 }
 
-void on_finish_config(mcapiConnection *conn) {
+void on_finish_config(mcapiConnection *conn, void* UNUSED(payload)) {
   mcapi_send_acknowledge_finish_config(conn);
 
   mcapi_set_state(conn, MCAPI_STATE_PLAY);
@@ -707,26 +694,25 @@ void on_finish_config(mcapiConnection *conn) {
   INFO("Playing!");
 }
 
-void on_chunk(mcapiConnection *conn, mcapiChunkAndLightDataPacket packet) {
-  UNUSED(conn)
-  Chunk *chunk = world_chunk(&game.world, packet.chunk_x, packet.chunk_z);
+void on_chunk(mcapiConnection *UNUSED(conn), mcapiChunkAndLightDataPacket* packet) {
+  Chunk *chunk = world_chunk(&game.world, packet->chunk_x, packet->chunk_z);
   bool is_new = false;
   if (chunk == NULL) {
     chunk = calloc(1, sizeof(Chunk));
     is_new = true;
   }
 
-  chunk->x = packet.chunk_x;
-  chunk->z = packet.chunk_z;
+  chunk->x = packet->chunk_x;
+  chunk->z = packet->chunk_z;
   for (int i = 0; i < 24; i++) {
     chunk->sections[i].num_quads = 0;
-    chunk->sections[i].x = packet.chunk_x;
+    chunk->sections[i].x = packet->chunk_x;
     chunk->sections[i].y = i - 4;
-    chunk->sections[i].z = packet.chunk_z;
-    memcpy(chunk->sections[i].data, packet.chunk_sections[i].blocks, 4096 * sizeof(int));
-    memcpy(chunk->sections[i].biome_data, packet.chunk_sections[i].biomes, 64 * sizeof(int));
-    memcpy(chunk->sections[i].sky_light, packet.sky_light_array[i + 1], 4096);
-    memcpy(chunk->sections[i].block_light, packet.block_light_array[i + 1], 4096);
+    chunk->sections[i].z = packet->chunk_z;
+    memcpy(chunk->sections[i].data, packet->chunk_sections[i].blocks, 4096 * sizeof(int));
+    memcpy(chunk->sections[i].biome_data, packet->chunk_sections[i].biomes, 64 * sizeof(int));
+    memcpy(chunk->sections[i].sky_light, packet->sky_light_array[i + 1], 4096);
+    memcpy(chunk->sections[i].block_light, packet->block_light_array[i + 1], 4096);
   }
   if (is_new) {
     world_add_chunk(&game.world, chunk);
@@ -734,42 +720,40 @@ void on_chunk(mcapiConnection *conn, mcapiChunkAndLightDataPacket packet) {
   world_init_new_meshes(&game.world, game.block_info, game.biome_info, game.device);
 }
 
-void on_light(mcapiConnection *conn, mcapiUpdateLightPacket packet) {
-  UNUSED(conn)
-  DEBUG("Light updated!!! %d, %d", packet.chunk_x, packet.chunk_z);
-  Chunk *chunk = world_chunk(&game.world, packet.chunk_x, packet.chunk_z);
+void on_light(mcapiConnection *UNUSED(conn), mcapiUpdateLightPacket *packet) {
+  DEBUG("Light updated!!! %d, %d", packet->chunk_x, packet->chunk_z);
+  Chunk *chunk = world_chunk(&game.world, packet->chunk_x, packet->chunk_z);
   if (chunk == NULL) {
     WARN("Chunk not loaded!");
     return;
   }
   // perror("In!\n");
   for (int i = 0; i < 24; i++) {
-    memcpy(chunk->sections[i].sky_light, packet.sky_light_array[i + 1], 4096);
-    memcpy(chunk->sections[i].block_light, packet.block_light_array[i + 1], 4096);
+    memcpy(chunk->sections[i].sky_light, packet->sky_light_array[i + 1], 4096);
+    memcpy(chunk->sections[i].block_light, packet->block_light_array[i + 1], 4096);
   }
   world_init_new_meshes(&game.world, game.block_info, game.biome_info, game.device);
 }
 
-void on_block_update(mcapiConnection *conn, mcapiBlockUpdatePacket packet) {
-  UNUSED(conn)
+void on_block_update(mcapiConnection *UNUSED(conn), mcapiBlockUpdatePacket *packet) {
   vec3 pos;
-  pos[0] = packet.position[0];
-  pos[1] = packet.position[1];
-  pos[2] = packet.position[2];
+  pos[0] = packet->position[0];
+  pos[1] = packet->position[1];
+  pos[2] = packet->position[2];
 
-  DEBUG("Block update %d %d %d", packet.position[0], packet.position[1], packet.position[2]);
+  DEBUG("Block update %d %d %d", packet->position[0], packet->position[1], packet->position[2]);
 
-  world_set_block(&game.world, pos, packet.block_id, game.block_info, game.biome_info, game.device);
+  world_set_block(&game.world, pos, packet->block_id, game.block_info, game.biome_info, game.device);
 }
 
-void on_position(mcapiConnection *conn, mcapiSynchronizePlayerPositionPacket packet) {
-  DEBUG("sync player position %f %f %f", packet.x, packet.y, packet.z);
-  game.position[0] = packet.x;
-  game.position[1] = packet.y;
-  game.position[2] = packet.z;
+void on_position(mcapiConnection *conn, mcapiSynchronizePlayerPositionPacket *packet) {
+  DEBUG("sync player position %f %f %f", packet->x, packet->y, packet->z);
+  game.position[0] = packet->x;
+  game.position[1] = packet->y;
+  game.position[2] = packet->z;
 
-  float pitch = packet.pitch * GLM_PIf / 180.0f;
-  float yaw = packet.yaw * GLM_PIf / 180.0f;
+  float pitch = packet->pitch * GLM_PIf / 180.0f;
+  float yaw = packet->yaw * GLM_PIf / 180.0f;
 
   game.elevation = -pitch;
   game.look[0] = -cos(pitch) * sin(yaw);
@@ -781,29 +765,26 @@ void on_position(mcapiConnection *conn, mcapiSynchronizePlayerPositionPacket pac
   glm_vec3_cross(game.up, game.right, game.forward);
   glm_normalize(game.forward);
 
-  mcapi_send_confirm_teleportation(conn, (mcapiConfirmTeleportationPacket){.teleport_id = packet.teleport_id});
+  mcapi_send_confirm_teleportation(conn, (mcapiConfirmTeleportationPacket){.teleport_id = packet->teleport_id});
 }
 
-void on_update_time(mcapiConnection *conn, mcapiUpdateTimePacket packet) {
-  UNUSED(conn)
-  // printf("World age: %ld, Time of day: %ld\n", packet.world_age, packet.time_of_day % 24000);
-  game.time_of_day = packet.time_of_day;
+void on_update_time(mcapiConnection *UNUSED(conn), mcapiUpdateTimePacket *packet) {
+  // printf("World age: %ld, Time of day: %ld\n", packet->world_age, packet->time_of_day % 24000);
+  game.time_of_day = packet->time_of_day;
 }
 
-void on_set_block_destroy_stage(mcapiConnection *conn, mcapiSetBlockDestroyStagePacket packet) {
-  UNUSED(conn)
-  DEBUG("Destroy stage %d", packet.stage);
+void on_set_block_destroy_stage(mcapiConnection *UNUSED(conn), mcapiSetBlockDestroyStagePacket *packet) {
+  DEBUG("Destroy stage %d", packet->stage);
 }
 
-void on_chunk_batch_finished(mcapiConnection *conn, mcapiChunkBatchFinishedPacket packet) {
-  UNUSED(packet);
-  TRACE("Chunk batch finished chunks=%d", packet.batch_size);
+void on_chunk_batch_finished(mcapiConnection *conn, mcapiChunkBatchFinishedPacket *UNUSED(packet)) {
+  TRACE("Chunk batch finished chunks=%d", packet->batch_size);
   mcapi_send_chunk_batch_received(conn, (mcapiChunkBatchReceivedPacket) { .chunks_per_tick = 0.1 });
 }
 
-void on_clientbound_keepalive(mcapiConnection *conn, mcapiClientboundKeepAlivePacket packet) {
-  DEBUG("Got keepalive id=%ld, sending response!", packet.keep_alive_id);
-  mcapi_send_serverbound_keepalive(conn, (mcapiServerboundKeepalivePacket) {.id = packet.keep_alive_id});
+void on_clientbound_keepalive(mcapiConnection *conn, mcapiClientboundKeepAlivePacket *packet) {
+  DEBUG("Got keepalive id=%ld, sending response!", packet->keep_alive_id);
+  mcapi_send_serverbound_keepalive(conn, (mcapiServerboundKeepalivePacket) {.id = packet->keep_alive_id});
 }
 
 int add_file_texture_to_image_sub_opacity(const char *fname, unsigned char *texture_sheet, int *cur_texture, int sub_opacity) {

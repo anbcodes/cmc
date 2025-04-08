@@ -2,8 +2,7 @@
 #include "macros.h"
 #include "logging.h"
 
-static void log_callback(WGPULogLevel level, char const *message, void *userdata) {
-  UNUSED(userdata)
+static void log_callback(WGPULogLevel level, char const *message, void * UNUSED(userdata)) {
   switch (level) {
     case WGPULogLevel_Error:
       ERROR("[wgpu] %s", message);

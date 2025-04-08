@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include <cglm/cglm.h>
-#include "datatypes.h"
+#include "../datatypes.h"
 
 /* --- Packet Reader/Writer Code --- */
 

@@ -1,6 +1,5 @@
 #pragma once
 #include "datatypes.h"
-#include "mcapi.h"
 
 typedef enum NBTTagType {
   NBT_END = 0x00,

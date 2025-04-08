@@ -3,8 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "cglm/cglm.h"
-#include "datatypes.h"
+#include <cglm/cglm.h>
+#include "../datatypes.h"
 
 void write_byte(WritableBuffer *io, uint8_t value);
 void write_bytes(WritableBuffer *io, void *src, int len);
