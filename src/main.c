@@ -14,6 +14,7 @@
 #include "lodepng/lodepng.h"
 #include "macros.h"
 #include "mcapi/mcapi.h"
+#include "mcapi/protocol.h"
 #include "nbt.h"
 
 #if defined(GLFW_EXPOSE_NATIVE_COCOA)
@@ -1750,6 +1751,52 @@ void block_selected_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
   wgpuRenderPassEncoderDraw(render_pass_encoder, 18 * 4 * 2, 1, 0, 0);
 }
 
+void read_json_arr_as_vec4(vec4 dst, cJSON * src) {
+  dst[0] = src->child->valuedouble;
+  dst[1] = src->child->next->valuedouble;
+  dst[2] = src->child->next->next->valuedouble;
+  dst[3] = src->child->next->next->next->valuedouble;
+}
+
+void lookup_model_texture() {
+
+}
+
+// Adds the elements array to the mesh, each element is a MeshCubiod
+void add_elements_to_blockinfo(BlockInfo* info, cJSON* elements, cJSON* textures) {
+  cJSON *cur_element = elements;
+
+  while ((cur_element = cur_element->next)) {
+    MeshCuboid* cubiod = calloc(1, sizeof(MeshCuboid));
+    cJSON* jfrom = cJSON_GetObjectItemCaseSensitive(cur_element, "from");
+    cJSON* jto = cJSON_GetObjectItemCaseSensitive(cur_element, "to");
+    cJSON* jfaces = cJSON_GetObjectItemCaseSensitive(cur_element, "faces");
+    cubiod->from[0] = jfrom->child->valuedouble;
+    cubiod->from[1] = jfrom->child->next->valuedouble;
+    cubiod->from[2] = jfrom->child->next->next->valuedouble;
+
+    cubiod->to[0] = jto->child->valuedouble;
+    cubiod->to[1] = jto->child->next->valuedouble;
+    cubiod->to[2] = jto->child->next->next->valuedouble;
+
+    cJSON *fup = cJSON_GetObjectItemCaseSensitive(jfaces, "up");
+    cJSON *fdown = cJSON_GetObjectItemCaseSensitive(jfaces, "down");
+    cJSON *fnorth = cJSON_GetObjectItemCaseSensitive(jfaces, "north");
+    cJSON *fsouth = cJSON_GetObjectItemCaseSensitive(jfaces, "south");
+    cJSON *feast = cJSON_GetObjectItemCaseSensitive(jfaces, "east");
+    cJSON *fwest = cJSON_GetObjectItemCaseSensitive(jfaces, "west");
+
+    read_json_arr_as_vec4(cubiod->up_uv, cJSON_GetObjectItemCaseSensitive(fup, "uv"));
+    read_json_arr_as_vec4(cubiod->down_uv, cJSON_GetObjectItemCaseSensitive(fdown, "uv"));
+    read_json_arr_as_vec4(cubiod->north_uv, cJSON_GetObjectItemCaseSensitive(fnorth, "uv"));
+    read_json_arr_as_vec4(cubiod->south_uv, cJSON_GetObjectItemCaseSensitive(fsouth, "uv"));
+    read_json_arr_as_vec4(cubiod->east_uv, cJSON_GetObjectItemCaseSensitive(feast, "uv"));
+    read_json_arr_as_vec4(cubiod->west_uv, cJSON_GetObjectItemCaseSensitive(fwest, "uv"));
+
+    cubiod->up_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(fup, "texture"));
+  }
+}
+
 void load_block_models() {
   int max_id = -1;
   char fname[1000];
@@ -1809,6 +1856,7 @@ void load_block_models() {
     cJSON *model_parent = NULL;
     cJSON *multipart = cJSON_GetObjectItemCaseSensitive(blockstate, "multipart");
     if (multipart != NULL) {
+      // TODO: Handle multipart parsing
       // Pick first random option for now
       model_parent = multipart->child;
       model_parent = cJSON_GetObjectItemCaseSensitive(model_parent, "apply");
@@ -1821,6 +1869,99 @@ void load_block_models() {
         // Pick first random option for now
         model_parent = model_parent->child;
       }
+
+      // Go through the states and look them up in the variants
+      cJSON *states = cJSON_GetObjectItemCaseSensitive(block, "states");
+      if (states != NULL) {
+        cJSON *state = states->child;
+        while (state != NULL) {
+          cJSON *state_id = cJSON_GetObjectItemCaseSensitive(state, "id");
+          cJSON *properties = cJSON_GetObjectItemCaseSensitive(state, "properties");
+          cJSON *prop = properties->child;
+          WritableBuffer stateStr = create_writable_buffer();
+          while (prop != NULL) {
+            write_string(&stateStr, to_string(prop->string));
+            write_byte(&stateStr, '=');
+            write_string(&stateStr, to_string(prop->valuestring));
+            write_byte(&stateStr, ',');
+            prop = prop->next;
+          }
+          stateStr.buf.buffer.ptr[stateStr.cursor - 1] = '\0'; // Remove the last comma and convert to cstr
+
+          cJSON *variant = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(variants, "variants"), (char*)stateStr.buf.buffer.ptr);
+          if (variant == NULL) {
+            WARN("Failed to find variant %sb for state %d", stateStr, state_id->valueint);
+            continue;
+          }
+          destroy_writable_buffer(stateStr);
+
+          BlockInfo info = { 0 };
+
+          cJSON *model_name = cJSON_GetObjectItemCaseSensitive(variant, "model");
+          if (model_name == NULL) {
+            WARN("model not found for %s", block_name);
+            block = block->next;
+            continue;
+          }
+
+          char *model_name_str = model_name->valuestring;
+          if (strncmp(model_name_str, "minecraft:", 10) == 0) {
+            model_name_str += 10;
+          }
+          snprintf(fname, 1000, "data/assets/minecraft/models/%s.json", model_name_str);
+          info.name = copy_buffer(to_string(block_name));
+          cJSON *model = load_json(fname);
+          if (model == NULL) {
+            WARN("model not found for %s", block_name);
+            block = block->next;
+            continue;
+          }
+
+          cJSON *textures = cJSON_GetObjectItemCaseSensitive(model, "textures");
+
+          add_elements_to_blockinfo(&info, cJSON_GetObjectItemCaseSensitive(model, "elements"), textures);
+
+          // Read the hierarchy
+          cJSON *parent_model = model;
+          cJSON *parent_item;
+          while ((parent_item = cJSON_GetObjectItemCaseSensitive(parent_model, "parent"))) {
+            char* parent_name = parent_item->valuestring;
+            snprintf(fname, 1000, "data/assets/minecraft/models/%s.json", parent_name);
+            if (parent_model != model) {
+              cJSON_Delete(parent_model);
+            }
+            parent_model = load_json(fname);
+            // We need to read the textures in each time
+            cJSON * parent_textures = cJSON_GetObjectItemCaseSensitive(parent_model, "textures");
+            if (parent_textures != NULL) {
+              cJSON * ptexture = parent_textures->child;
+              while ((ptexture = ptexture->next)) {
+                char* ptexture_value = ptexture->valuestring;
+                if (ptexture_value[0] == '#') {
+                  // Look up real texture
+                  cJSON *t = cJSON_GetObjectItemCaseSensitive(textures, ptexture_value+1);
+                  ptexture_value = t->valuestring;
+                }
+                cJSON_AddStringToObject(textures, ptexture->string, ptexture_value);
+              }
+            }
+
+            // Other than that, it's just parsing the elements
+            add_elements_to_blockinfo(&info, cJSON_GetObjectItemCaseSensitive(parent_model, "elements"), textures);
+          }
+
+          if (state_id != NULL && cJSON_IsNumber(state_id)) {
+            int id = state_id->valueint;
+            if (id > max_id) {
+              max_id = id;
+            }
+            game.block_info[id] = info;
+          }
+          state = state->next;
+        }
+      }
+      cJSON_Delete(blockstate);
+      continue;
     }
     if (model_parent == NULL) {
       WARN("model parent not found for %s", block_name);

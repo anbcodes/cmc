@@ -10,6 +10,28 @@
 // So each chunk is 24 sections tall
 #define Y_SECTIONS 24
 
+typedef struct MeshCuboid {
+  vec3 from;
+  vec3 to;
+  int16_t up_texture;
+  vec4 up_uv;
+  int16_t down_texture;
+  vec4 down_uv;
+  int16_t north_texture;
+  vec4 north_uv;
+  int16_t south_texture;
+  vec4 south_uv;
+  int16_t east_texture;
+  vec4 east_uv;
+  int16_t west_texture;
+  vec4 west_uv;
+} MeshCuboid;
+
+typedef struct Mesh {
+  vec3 rotation;
+  MeshCuboid** elements;
+} Mesh;
+
 typedef struct BlockInfo {
   // The most common textures (and overlay for grass)
   String name;
@@ -28,6 +50,7 @@ typedef struct BlockInfo {
   bool passable;
   bool grass;
   bool foliage;
+  Mesh mesh;
 } BlockInfo;
 
 typedef struct BiomeInfo {
