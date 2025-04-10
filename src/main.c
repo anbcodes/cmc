@@ -1761,21 +1761,35 @@ void block_selected_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
 }
 
 void read_json_arr_as_vec4(vec4 dst, cJSON * src) {
-  dst[0] = src->child->valuedouble;
-  dst[1] = src->child->next->valuedouble;
-  dst[2] = src->child->next->next->valuedouble;
-  dst[3] = src->child->next->next->next->valuedouble;
+  if (src) {
+    dst[0] = src->child->valuedouble;
+    dst[1] = src->child->next->valuedouble;
+    dst[2] = src->child->next->next->valuedouble;
+    dst[3] = src->child->next->next->next->valuedouble;
+  } else {
+    dst[0] = 0;
+    dst[1] = 0;
+    dst[2] = 16;
+    dst[2] = 16;
+  }
 }
 
-void lookup_model_texture() {
-
+int lookup_model_texture(cJSON * textures, char *texture_name) {
+  if (texture_name[0] == '#') {
+    texture_name = cJSON_GetObjectItemCaseSensitive(textures, texture_name + 1)->valuestring;
+  }
+  char fname[1000];
+  snprintf(fname, 1000, "data/assets/minecraft/textures/%s.png", texture_name);
+  return add_file_texture_to_image(fname, game.texture_sheet, &game.next_texture_loc);
 }
 
 // Adds the elements array to the mesh, each element is a MeshCubiod
 void add_elements_to_blockinfo(BlockInfo* info, cJSON* elements, cJSON* textures) {
-  cJSON *cur_element = elements;
-
-  while ((cur_element = cur_element->next)) {
+  if (!elements) {
+    return;
+  }
+  cJSON *cur_element = elements->child;
+  while (cur_element) {
     MeshCuboid* cubiod = calloc(1, sizeof(MeshCuboid));
     cJSON* jfrom = cJSON_GetObjectItemCaseSensitive(cur_element, "from");
     cJSON* jto = cJSON_GetObjectItemCaseSensitive(cur_element, "to");
@@ -1795,14 +1809,34 @@ void add_elements_to_blockinfo(BlockInfo* info, cJSON* elements, cJSON* textures
     cJSON *feast = cJSON_GetObjectItemCaseSensitive(jfaces, "east");
     cJSON *fwest = cJSON_GetObjectItemCaseSensitive(jfaces, "west");
 
-    read_json_arr_as_vec4(cubiod->up_uv, cJSON_GetObjectItemCaseSensitive(fup, "uv"));
-    read_json_arr_as_vec4(cubiod->down_uv, cJSON_GetObjectItemCaseSensitive(fdown, "uv"));
-    read_json_arr_as_vec4(cubiod->north_uv, cJSON_GetObjectItemCaseSensitive(fnorth, "uv"));
-    read_json_arr_as_vec4(cubiod->south_uv, cJSON_GetObjectItemCaseSensitive(fsouth, "uv"));
-    read_json_arr_as_vec4(cubiod->east_uv, cJSON_GetObjectItemCaseSensitive(feast, "uv"));
-    read_json_arr_as_vec4(cubiod->west_uv, cJSON_GetObjectItemCaseSensitive(fwest, "uv"));
+    if (fup) {
+      read_json_arr_as_vec4(cubiod->up_uv, cJSON_GetObjectItemCaseSensitive(fup, "uv"));
+      cubiod->up_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(fup, "texture")->valuestring);
+    }
+    if (fdown) {
+      read_json_arr_as_vec4(cubiod->down_uv, cJSON_GetObjectItemCaseSensitive(fdown, "uv"));
+      cubiod->down_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(fdown, "texture")->valuestring);
+    }
+    if (fnorth) {
+      read_json_arr_as_vec4(cubiod->north_uv, cJSON_GetObjectItemCaseSensitive(fnorth, "uv"));
+      cubiod->north_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(fnorth, "texture")->valuestring);
+    }
+    if (fsouth) {
+      read_json_arr_as_vec4(cubiod->south_uv, cJSON_GetObjectItemCaseSensitive(fsouth, "uv"));
+      cubiod->south_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(fsouth, "texture")->valuestring);
+    }
+    if (feast) {
+      read_json_arr_as_vec4(cubiod->east_uv, cJSON_GetObjectItemCaseSensitive(feast, "uv"));
+      cubiod->east_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(feast, "texture")->valuestring);
+    }
+    if (fwest) {
+      read_json_arr_as_vec4(cubiod->west_uv, cJSON_GetObjectItemCaseSensitive(fwest, "uv"));
+      cubiod->west_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(fwest, "texture")->valuestring);
+    }
 
-    cubiod->up_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(fup, "texture"));
+    // cubiod->up_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(fup, "texture"));
+    // cubiod->up_texture = add_texture(textures, cJSON_GetObjectItemCaseSensitive(fup, "texture"));
+    cur_element = cur_element->next;
   }
 }
 
@@ -1897,20 +1931,25 @@ void load_block_models() {
         while (state != NULL) {
           cJSON *state_id = cJSON_GetObjectItemCaseSensitive(state, "id");
           cJSON *properties = cJSON_GetObjectItemCaseSensitive(state, "properties");
-          cJSON *prop = properties->child;
           WritableBuffer stateStr = create_writable_buffer();
-          while (prop != NULL) {
-            write_string(&stateStr, to_string(prop->string));
-            write_byte(&stateStr, '=');
-            write_string(&stateStr, to_string(prop->valuestring));
-            write_byte(&stateStr, ',');
-            prop = prop->next;
+          if (properties) {
+            cJSON *prop = properties->child;
+            while (prop != NULL) {
+              write_buffer(&stateStr, to_string(prop->string));
+              write_byte(&stateStr, '=');
+              write_buffer(&stateStr, to_string(prop->valuestring));
+              write_byte(&stateStr, ',');
+              prop = prop->next;
+            }
+          } else {
+            write_byte(&stateStr, '\0');
           }
           stateStr.buf.buffer.ptr[stateStr.cursor - 1] = '\0'; // Remove the last comma and convert to cstr
 
-          cJSON *variant = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(variants, "variants"), (char*)stateStr.buf.buffer.ptr);
+          cJSON *variant = cJSON_GetObjectItemCaseSensitive(variants, (char*)stateStr.buf.buffer.ptr);
           if (variant == NULL) {
-            WARN("Failed to find variant %sb for state %d", stateStr, state_id->valueint);
+            WARN("Failed to find variant %sb for state %d", (Buffer){.ptr = stateStr.buf.buffer.ptr, .len = stateStr.cursor}, state_id->valueint);
+            state = state->next;
             continue;
           }
           destroy_writable_buffer(stateStr);
@@ -1920,7 +1959,7 @@ void load_block_models() {
           cJSON *model_name = cJSON_GetObjectItemCaseSensitive(variant, "model");
           if (model_name == NULL) {
             WARN("model not found for %s", block_name);
-            block = block->next;
+            state = state->next;
             continue;
           }
 
@@ -1954,15 +1993,21 @@ void load_block_models() {
             // We need to read the textures in each time
             cJSON * parent_textures = cJSON_GetObjectItemCaseSensitive(parent_model, "textures");
             if (parent_textures != NULL) {
-              cJSON * ptexture = parent_textures->child;
-              while ((ptexture = ptexture->next)) {
-                char* ptexture_value = ptexture->valuestring;
-                if (ptexture_value[0] == '#') {
-                  // Look up real texture
-                  cJSON *t = cJSON_GetObjectItemCaseSensitive(textures, ptexture_value+1);
-                  ptexture_value = t->valuestring;
+              if (textures == NULL) {
+                textures = parent_textures;
+              } else {
+                cJSON * ptexture = parent_textures->child;
+                while (ptexture) {
+                  char* ptexture_value = ptexture->valuestring;
+                  if (ptexture_value[0] == '#') {
+                    // Look up real texture
+                    // TODO: textures is NULL for crafter, 3 level hierarchy
+                    cJSON *t = cJSON_GetObjectItemCaseSensitive(textures, ptexture_value+1);
+                    ptexture_value = t->valuestring;
+                  }
+                  cJSON_AddStringToObject(textures, ptexture->string, ptexture_value);
+                  ptexture = ptexture->next;
                 }
-                cJSON_AddStringToObject(textures, ptexture->string, ptexture_value);
               }
             }
 
@@ -1980,9 +2025,12 @@ void load_block_models() {
           state = state->next;
         }
       }
+      block = block->next;
       cJSON_Delete(blockstate);
       continue;
     }
+    DEBUG("Should not get here");
+    // continue;
     if (model_parent == NULL) {
       WARN("model parent not found for %s", block_name);
       block = block->next;
