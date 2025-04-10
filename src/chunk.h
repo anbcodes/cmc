@@ -46,11 +46,13 @@ typedef struct BlockInfo {
   int16_t texture_cross;
   int16_t texture_layer0;
   int16_t texture_vine;
+  int16_t texture_flowerbed;
   bool transparent;
   bool passable;
   bool grass;
   bool foliage;
   Mesh mesh;
+  bool dry_foliage;
 } BlockInfo;
 
 typedef struct BiomeInfo {
@@ -65,6 +67,7 @@ typedef struct BiomeInfo {
   vec3 grass_color;
   bool custom_foliage_color;
   vec3 foliage_color;
+  vec3 dry_foliage_color;
 } BiomeInfo;
 
 typedef struct ChunkSection {

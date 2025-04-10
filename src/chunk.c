@@ -373,6 +373,9 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           if (tile == 0) {
             tile = info.texture_vine;
           }
+          if (tile == 0) {
+            tile = info.texture_flowerbed;
+          }
           if (d == 1 && info.texture_end != 0) {
             tile = info.texture_end;
           }
@@ -399,6 +402,9 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           }
           if (info.foliage) {
             glm_vec3_copy(biome.foliage_color, color);
+          }
+          if (info.dry_foliage) {
+            glm_vec3_copy(biome.dry_foliage_color, color);
           }
 
           // Needed for grass overlay on the sides

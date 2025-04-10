@@ -137,6 +137,7 @@ typedef struct Game {
   double target_tick_time;
   double last_tick_time;
   double current_time;
+  int target_material;
 
   double block_breaking_start;
   ivec3 block_breaking_position;
@@ -625,6 +626,9 @@ void on_registry(mcapiConnection *UNUSED(conn), mcapiRegistryDataPacket *packet)
     unsigned char *foliage = load_image("data/assets/minecraft/textures/colormap/foliage.png", &width, &height);
     assert(width == 256);
     assert(height == 256);
+    unsigned char *dry_foliage = load_image("data/assets/minecraft/textures/colormap/dry_foliage.png", &width, &height);
+    assert(width == 256);
+    assert(height == 256);
     for (int i = 0; i < packet->entry_count; i++) {
       BiomeInfo info = {0};
       info.temperature = nbt_get_compound_tag(packet->entries[i], "temperature")->float_value;
@@ -675,6 +679,10 @@ void on_registry(mcapiConnection *UNUSED(conn), mcapiRegistryDataPacket *packet)
         info.foliage_color[1] = foliage[index * 4 + 1] / 255.0f;
         info.foliage_color[2] = foliage[index * 4 + 2] / 255.0f;
       }
+
+      info.dry_foliage_color[0] = dry_foliage[index * 4 + 0] / 255.0f;
+      info.dry_foliage_color[1] = dry_foliage[index * 4 + 1] / 255.0f;
+      info.dry_foliage_color[2] = dry_foliage[index * 4 + 2] / 255.0f;
 
       game.biome_info[i] = info;
       // print_string(packet->entry_names[i]);
@@ -1702,6 +1710,7 @@ void block_selected_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
   vec3 normal;
   int material;
   world_target_block(&game.world, eye, game.look, reach, game.block_selected_renderer.uniforms.position, normal, &material);
+  game.target_material = material;
   if (material == 0) {
     return;
   }
@@ -1818,17 +1827,28 @@ void load_block_models() {
       strcmp(type->valuestring, "minecraft:vine") == 0 ||
       strcmp(type->valuestring, "minecraft:dry_vegetation") == 0 ||
       strcmp(type->valuestring, "minecraft:firefly_bush") == 0 ||
-      strcmp(type->valuestring, "minecraft:mushroom") == 0
+      strcmp(type->valuestring, "minecraft:mushroom") == 0 ||
+      strcmp(type->valuestring, "minecraft:liquid") == 0 ||
+      strcmp(type->valuestring, "minecraft:seagrass") == 0 ||
+      strcmp(type->valuestring, "minecraft:tall_seagrass") == 0 ||
+      strcmp(type->valuestring, "minecraft:flower_bed") == 0 ||
+      strcmp(type->valuestring, "minecraft:bush") == 0
     ) {
       info.passable = true;
       info.transparent = true;
+    }
+    if (strcmp(type->valuestring, "minecraft:leaf_litter") == 0) {
+      info.passable = true;
+      info.transparent = true;
+      info.dry_foliage = true;
     }
     if (strcmp(type->valuestring, "minecraft:grass") == 0) {
       info.grass = true;
     }
     if (
       strcmp(type->valuestring, "minecraft:tall_grass") == 0 ||
-      strcmp(type->valuestring, "minecraft:double_plant") == 0
+      strcmp(type->valuestring, "minecraft:double_plant") == 0 ||
+      strcmp(type->valuestring, "minecraft:sugar_cane") == 0
     ) {
       info.passable = true;
       info.transparent = true;
@@ -2002,6 +2022,7 @@ void load_block_models() {
     info.texture_cross = add_texture(textures, "cross", game.texture_sheet, &game.next_texture_loc);
     info.texture_layer0 = add_texture(textures, "layer0", game.texture_sheet, &game.next_texture_loc);
     info.texture_vine = add_texture(textures, "vine", game.texture_sheet, &game.next_texture_loc);
+    info.texture_flowerbed = add_texture(textures, "flowerbed", game.texture_sheet, &game.next_texture_loc);
 
     cJSON *states = cJSON_GetObjectItemCaseSensitive(block, "states");
     if (states != NULL) {
@@ -2312,9 +2333,15 @@ void update_block_breaking_stages() {
   }
 }
 
+int tick_count = 0;
+
 void tick() {
+  tick_count += 1;
   update_player_position((float)(1.0 / TICKS_PER_SECOND));
   update_block_breaking_stages();
+  if (tick_count % 10 == 0) {
+    DEBUG("target_material: %sb", game.block_info[game.target_material].name);
+  }
 }
 
 int main(int argc, char *argv[]) {
