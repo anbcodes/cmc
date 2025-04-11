@@ -1949,6 +1949,7 @@ void load_block_models() {
           cJSON *variant = cJSON_GetObjectItemCaseSensitive(variants, (char*)stateStr.buf.buffer.ptr);
           if (variant == NULL) {
             WARN("Failed to find variant %sb for state %d", (Buffer){.ptr = stateStr.buf.buffer.ptr, .len = stateStr.cursor}, state_id->valueint);
+            // assert(false);
             state = state->next;
             continue;
           }
@@ -1976,44 +1977,42 @@ void load_block_models() {
             continue;
           }
 
-          cJSON *textures = cJSON_GetObjectItemCaseSensitive(model, "textures");
-
-          add_elements_to_blockinfo(&info, cJSON_GetObjectItemCaseSensitive(model, "elements"), textures);
-
           // Read the hierarchy
+          cJSON *textures = cJSON_CreateObject();
           cJSON *parent_model = model;
-          cJSON *parent_item;
-          while ((parent_item = cJSON_GetObjectItemCaseSensitive(parent_model, "parent"))) {
-            char* parent_name = parent_item->valuestring;
-            snprintf(fname, 1000, "data/assets/minecraft/models/%s.json", parent_name);
-            if (parent_model != model) {
-              cJSON_Delete(parent_model);
-            }
-            parent_model = load_json(fname);
+          while (parent_model) {
             // We need to read the textures in each time
             cJSON * parent_textures = cJSON_GetObjectItemCaseSensitive(parent_model, "textures");
             if (parent_textures != NULL) {
-              if (textures == NULL) {
-                textures = parent_textures;
-              } else {
-                cJSON * ptexture = parent_textures->child;
-                while (ptexture) {
-                  char* ptexture_value = ptexture->valuestring;
-                  if (ptexture_value[0] == '#') {
-                    // Look up real texture
-                    // TODO: textures is NULL for crafter, 3 level hierarchy
-                    cJSON *t = cJSON_GetObjectItemCaseSensitive(textures, ptexture_value+1);
-                    ptexture_value = t->valuestring;
-                  }
-                  cJSON_AddStringToObject(textures, ptexture->string, ptexture_value);
-                  ptexture = ptexture->next;
+              cJSON * ptexture = parent_textures->child;
+              while (ptexture != NULL) {
+                char* ptexture_value = ptexture->valuestring;
+                if (ptexture_value[0] == '#') {
+                  // Look up real texture
+                  cJSON *t = cJSON_GetObjectItemCaseSensitive(textures, ptexture_value+1);
+                  ptexture_value = t->valuestring;
                 }
+                cJSON_AddStringToObject(textures, ptexture->string, ptexture_value);
+                ptexture = ptexture->next;
               }
             }
 
             // Other than that, it's just parsing the elements
             add_elements_to_blockinfo(&info, cJSON_GetObjectItemCaseSensitive(parent_model, "elements"), textures);
+
+            cJSON *parent_item = cJSON_GetObjectItemCaseSensitive(parent_model, "parent");
+            if (parent_item) {
+              char* parent_name = parent_item->valuestring;
+              snprintf(fname, 1000, "data/assets/minecraft/models/%s.json", parent_name);
+              if (parent_model != model) {
+                cJSON_Delete(parent_model);
+              }
+              parent_model = load_json(fname);
+            } else {
+              parent_model = NULL;
+            }
           }
+          cJSON_Delete(textures);
 
           if (state_id != NULL && cJSON_IsNumber(state_id)) {
             int id = state_id->valueint;
