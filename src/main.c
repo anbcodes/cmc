@@ -34,7 +34,8 @@
 #define TEXTURE_SIZE 16
 // There are 899 textures in 1.20.6 - Should fit in 32*32 = 1024 sheet
 // #define TEXTURE_TILES 32
-#define TEXTURE_TILES 40
+// #define TEXTURE_TILES 40
+#define TEXTURE_TILES 400
 
 // The max number of blocks that can be being broken at the same time
 #define MAX_CONCURRENT_BLOCK_BREAKING 50
@@ -807,6 +808,10 @@ int add_file_texture_to_image_sub_opacity(const char *fname, unsigned char *text
   }
 
   int texture_id = *cur_texture;
+  if (texture_id >= TEXTURE_TILES * TEXTURE_TILES) {
+    WARN("Too many textures, increase TEXTURE_TILES");
+    assert(false);
+  }
   *cur_texture += 1;
   int full_width = TEXTURE_SIZE * TEXTURE_TILES;
   int tile_start_x = (texture_id % TEXTURE_TILES) * TEXTURE_SIZE;
@@ -1776,7 +1781,7 @@ void read_json_arr_as_vec4(vec4 dst, cJSON * src) {
 
 int lookup_model_texture(cJSON * textures, char *texture_name) {
   if (texture_name[0] == '#') {
-    texture_name = cJSON_GetObjectItemCaseSensitive(textures, texture_name + 1)->valuestring;
+    texture_name = cJSON_GetObjectItemCaseSensitive(textures, texture_name + 1)->valuestring + 10;
   }
   char fname[1000];
   snprintf(fname, 1000, "data/assets/minecraft/textures/%s.png", texture_name);
@@ -1786,11 +1791,20 @@ int lookup_model_texture(cJSON * textures, char *texture_name) {
 // Adds the elements array to the mesh, each element is a MeshCubiod
 void add_elements_to_blockinfo(BlockInfo* info, cJSON* elements, cJSON* textures) {
   if (!elements) {
+    DEBUG("Null elements for %sb", info->name);
     return;
   }
+  info->mesh.num_elements = cJSON_GetArraySize(elements);
+  DEBUG("Elements for %sb: %d", info->name, info->mesh.num_elements);
+  if (info->mesh.num_elements == 0) {
+    return;
+  }
+  info->mesh.elements = (MeshCuboid**)calloc(info->mesh.num_elements, sizeof(MeshCuboid*));
   cJSON *cur_element = elements->child;
+  int cur_index = 0;
   while (cur_element) {
     MeshCuboid* cubiod = calloc(1, sizeof(MeshCuboid));
+    info->mesh.elements[cur_index] = cubiod;
     cJSON* jfrom = cJSON_GetObjectItemCaseSensitive(cur_element, "from");
     cJSON* jto = cJSON_GetObjectItemCaseSensitive(cur_element, "to");
     cJSON* jfaces = cJSON_GetObjectItemCaseSensitive(cur_element, "faces");
@@ -1837,16 +1851,19 @@ void add_elements_to_blockinfo(BlockInfo* info, cJSON* elements, cJSON* textures
     // cubiod->up_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(fup, "texture"));
     // cubiod->up_texture = add_texture(textures, cJSON_GetObjectItemCaseSensitive(fup, "texture"));
     cur_element = cur_element->next;
+    cur_index += 1;
   }
 }
 
 void load_block_models() {
   int max_id = -1;
   char fname[1000];
+  char key_buffer[1000];
+  char value_buffer[1000];
   game.blocks = load_json("data/blocks.json");
   cJSON *block = game.blocks->child;
   while (block != NULL) {
-    BlockInfo info = {0};
+    BlockInfo shared_info = {0};
     char *block_name = block->string;
     if (strncmp(block_name, "minecraft:", 10) == 0) {
       block_name += 10;
@@ -1854,7 +1871,7 @@ void load_block_models() {
 
     cJSON *definition = cJSON_GetObjectItemCaseSensitive(block, "definition");
     cJSON *type = cJSON_GetObjectItemCaseSensitive(definition, "type");
-    info.type = copy_buffer(to_string(type->valuestring));
+    shared_info.type = copy_buffer(to_string(type->valuestring));
     if (
       strcmp(type->valuestring, "minecraft:air") == 0 ||
       strcmp(type->valuestring, "minecraft:flower") == 0 ||
@@ -1868,25 +1885,25 @@ void load_block_models() {
       strcmp(type->valuestring, "minecraft:flower_bed") == 0 ||
       strcmp(type->valuestring, "minecraft:bush") == 0
     ) {
-      info.passable = true;
-      info.transparent = true;
+      shared_info.passable = true;
+      shared_info.transparent = true;
     }
     if (strcmp(type->valuestring, "minecraft:leaf_litter") == 0) {
-      info.passable = true;
-      info.transparent = true;
-      info.dry_foliage = true;
+      shared_info.passable = true;
+      shared_info.transparent = true;
+      shared_info.dry_foliage = true;
     }
     if (strcmp(type->valuestring, "minecraft:grass") == 0) {
-      info.grass = true;
+      shared_info.grass = true;
     }
     if (
       strcmp(type->valuestring, "minecraft:tall_grass") == 0 ||
       strcmp(type->valuestring, "minecraft:double_plant") == 0 ||
       strcmp(type->valuestring, "minecraft:sugar_cane") == 0
     ) {
-      info.passable = true;
-      info.transparent = true;
-      info.grass = true;
+      shared_info.passable = true;
+      shared_info.transparent = true;
+      shared_info.grass = true;
     }
     if (
       strcmp(type->valuestring, "minecraft:leaves") == 0 ||
@@ -1894,8 +1911,8 @@ void load_block_models() {
       strcmp(type->valuestring, "minecraft:waterlily") == 0 ||
       strcmp(type->valuestring, "minecraft:vine") == 0
     ) {
-      info.transparent = true;
-      info.foliage = true;
+      shared_info.transparent = true;
+      shared_info.foliage = true;
     }
 
     snprintf(fname, 1000, "data/assets/minecraft/blockstates/%s.json", block_name);
@@ -1929,33 +1946,103 @@ void load_block_models() {
       if (states != NULL) {
         cJSON *state = states->child;
         while (state != NULL) {
+          DEBUG("Reading state");
           cJSON *state_id = cJSON_GetObjectItemCaseSensitive(state, "id");
           cJSON *properties = cJSON_GetObjectItemCaseSensitive(state, "properties");
-          WritableBuffer stateStr = create_writable_buffer();
-          if (properties) {
-            cJSON *prop = properties->child;
-            while (prop != NULL) {
-              write_buffer(&stateStr, to_string(prop->string));
-              write_byte(&stateStr, '=');
-              write_buffer(&stateStr, to_string(prop->valuestring));
-              write_byte(&stateStr, ',');
-              prop = prop->next;
-            }
-          } else {
-            write_byte(&stateStr, '\0');
-          }
-          stateStr.buf.buffer.ptr[stateStr.cursor - 1] = '\0'; // Remove the last comma and convert to cstr
 
-          cJSON *variant = cJSON_GetObjectItemCaseSensitive(variants, (char*)stateStr.buf.buffer.ptr);
+          // New plan
+          // Iterate through variants
+          // Parse the object key for property values "name=value,name=value,...,name=value"
+          // For each name, make sure properties has the same property value
+          cJSON *variant = variants->child;
+          if (properties != NULL) {
+            while (variant != NULL) {
+              bool all_properties_match = true;
+              char *ch = variant->string;
+              while (*ch != '\0') {
+                char *end = ch;
+                while (*end != '=') {
+                  end += 1;
+                }
+                memcpy(key_buffer, ch, end - ch);
+                key_buffer[end - ch] = '\0';
+                ch = end + 1;
+                end = ch;
+                while (*end != ',' && *end != '\0') {
+                  end += 1;
+                }
+                memcpy(value_buffer, ch, end - ch);
+                value_buffer[end - ch] = '\0';
+                if (*end == ',') {
+                  ch = end + 1;
+                } else {
+                  ch = end;
+                }
+                cJSON *property_value = cJSON_GetObjectItem(properties, key_buffer);
+                if (property_value == NULL) {
+                  all_properties_match = false;
+                  break;
+                }
+                if (cJSON_IsTrue(property_value) && strcmp(value_buffer, "true")) {
+                  all_properties_match = false;
+                  break;
+                }
+                if (cJSON_IsFalse(property_value) && strcmp(value_buffer, "false")) {
+                  all_properties_match = false;
+                  break;
+                }
+                if (cJSON_IsString(property_value) && strcmp(value_buffer, property_value->valuestring)) {
+                  all_properties_match = false;
+                  break;
+                }
+                if (cJSON_IsNumber(property_value) && atoi(value_buffer) != property_value->valueint) {
+                  all_properties_match = false;
+                  break;
+                }
+              }
+              if (all_properties_match) {
+                break;
+              }
+              variant = variant->next;
+            }
+          }
+
           if (variant == NULL) {
-            WARN("Failed to find variant %sb for state %d", (Buffer){.ptr = stateStr.buf.buffer.ptr, .len = stateStr.cursor}, state_id->valueint);
-            // assert(false);
+            WARN("Failed to find variant for state %d", state_id->valueint);
+            assert(false);
             state = state->next;
             continue;
           }
-          destroy_writable_buffer(stateStr);
 
-          BlockInfo info = { 0 };
+          // Old code
+
+          // WritableBuffer stateStr = create_writable_buffer();
+          // if (properties) {
+          //   cJSON *prop = properties->child;
+          //   while (prop != NULL) {
+          //     write_buffer(&stateStr, to_string(prop->string));
+          //     write_byte(&stateStr, '=');
+          //     write_buffer(&stateStr, to_string(prop->valuestring));
+          //     write_byte(&stateStr, ',');
+          //     prop = prop->next;
+          //   }
+          // } else {
+          //   write_byte(&stateStr, '\0');
+          // }
+          // stateStr.buf.buffer.ptr[stateStr.cursor - 1] = '\0'; // Remove the last comma and convert to cstr
+
+          // cJSON *variant = cJSON_GetObjectItemCaseSensitive(variants, (char*)stateStr.buf.buffer.ptr);
+          // if (variant == NULL) {
+          //   WARN("Failed to find variant %sb for state %d", (Buffer){.ptr = stateStr.buf.buffer.ptr, .len = stateStr.cursor}, state_id->valueint);
+          //   // assert(false);
+          //   state = state->next;
+          //   continue;
+          // }
+          // destroy_writable_buffer(stateStr);
+
+          // End old code
+
+          BlockInfo info = shared_info;
 
           cJSON *model_name = cJSON_GetObjectItemCaseSensitive(variant, "model");
           if (model_name == NULL) {
@@ -1976,6 +2063,8 @@ void load_block_models() {
             block = block->next;
             continue;
           }
+
+          DEBUG("Reading hierarchy");
 
           // Read the hierarchy
           cJSON *textures = cJSON_CreateObject();
@@ -2001,14 +2090,16 @@ void load_block_models() {
             add_elements_to_blockinfo(&info, cJSON_GetObjectItemCaseSensitive(parent_model, "elements"), textures);
 
             cJSON *parent_item = cJSON_GetObjectItemCaseSensitive(parent_model, "parent");
-            if (parent_item) {
+            if (parent_item != NULL) {
               char* parent_name = parent_item->valuestring;
+              parent_name += 10; // remove "minecraft:"
               snprintf(fname, 1000, "data/assets/minecraft/models/%s.json", parent_name);
               if (parent_model != model) {
                 cJSON_Delete(parent_model);
               }
               parent_model = load_json(fname);
             } else {
+              DEBUG("Null parent");
               parent_model = NULL;
             }
           }
@@ -2026,68 +2117,69 @@ void load_block_models() {
       }
       block = block->next;
       cJSON_Delete(blockstate);
+      // break;
       continue;
     }
-    DEBUG("Should not get here");
-    // continue;
-    if (model_parent == NULL) {
-      WARN("model parent not found for %s", block_name);
-      block = block->next;
-      cJSON_Delete(blockstate);
-      continue;
-    }
-    cJSON *model_name = cJSON_GetObjectItemCaseSensitive(model_parent, "model");
-    if (model_name == NULL) {
-      WARN("model not found for %s", block_name);
-      block = block->next;
-      cJSON_Delete(blockstate);
-      continue;
-    }
-    char *model_name_str = model_name->valuestring;
-    if (strncmp(model_name_str, "minecraft:", 10) == 0) {
-      model_name_str += 10;
-    }
-    snprintf(fname, 1000, "data/assets/minecraft/models/%s.json", model_name_str);
-    // info.name = copy_buffer(to_string(model_name_str));
-    info.name = copy_buffer(to_string(block_name));
-    cJSON_Delete(blockstate);
-    cJSON *model = load_json(fname);
-    if (model == NULL) {
-      WARN("model not found for %s", block_name);
-      block = block->next;
-      continue;
-    }
-    cJSON *textures = cJSON_GetObjectItemCaseSensitive(model, "textures");
+    // DEBUG("Should not get here");
+    // // continue;
+    // if (model_parent == NULL) {
+    //   WARN("model parent not found for %s", block_name);
+    //   block = block->next;
+    //   cJSON_Delete(blockstate);
+    //   continue;
+    // }
+    // cJSON *model_name = cJSON_GetObjectItemCaseSensitive(model_parent, "model");
+    // if (model_name == NULL) {
+    //   WARN("model not found for %s", block_name);
+    //   block = block->next;
+    //   cJSON_Delete(blockstate);
+    //   continue;
+    // }
+    // char *model_name_str = model_name->valuestring;
+    // if (strncmp(model_name_str, "minecraft:", 10) == 0) {
+    //   model_name_str += 10;
+    // }
+    // snprintf(fname, 1000, "data/assets/minecraft/models/%s.json", model_name_str);
+    // // info.name = copy_buffer(to_string(model_name_str));
+    // info.name = copy_buffer(to_string(block_name));
+    // cJSON *model = load_json(fname);
+    // if (model == NULL) {
+    //   WARN("model not found for %s", block_name);
+    //   block = block->next;
+    //   continue;
+    // }
+    // cJSON *textures = cJSON_GetObjectItemCaseSensitive(model, "textures");
 
-    info.texture = add_texture(textures, "texture", game.texture_sheet, &game.next_texture_loc);
-    info.texture_bottom = add_texture(textures, "bottom", game.texture_sheet, &game.next_texture_loc);
-    info.texture_top = add_texture(textures, "top", game.texture_sheet, &game.next_texture_loc);
-    info.texture_end = add_texture(textures, "end", game.texture_sheet, &game.next_texture_loc);
-    info.texture_side = add_texture(textures, "side", game.texture_sheet, &game.next_texture_loc);
-    info.texture_overlay = add_texture(textures, "overlay", game.texture_sheet, &game.next_texture_loc);
-    info.texture_all = add_texture(textures, "all", game.texture_sheet, &game.next_texture_loc);
-    info.texture_cross = add_texture(textures, "cross", game.texture_sheet, &game.next_texture_loc);
-    info.texture_layer0 = add_texture(textures, "layer0", game.texture_sheet, &game.next_texture_loc);
-    info.texture_vine = add_texture(textures, "vine", game.texture_sheet, &game.next_texture_loc);
-    info.texture_flowerbed = add_texture(textures, "flowerbed", game.texture_sheet, &game.next_texture_loc);
+    // info.texture = add_texture(textures, "texture", game.texture_sheet, &game.next_texture_loc);
+    // info.texture_bottom = add_texture(textures, "bottom", game.texture_sheet, &game.next_texture_loc);
+    // info.texture_top = add_texture(textures, "top", game.texture_sheet, &game.next_texture_loc);
+    // info.texture_end = add_texture(textures, "end", game.texture_sheet, &game.next_texture_loc);
+    // info.texture_side = add_texture(textures, "side", game.texture_sheet, &game.next_texture_loc);
+    // info.texture_overlay = add_texture(textures, "overlay", game.texture_sheet, &game.next_texture_loc);
+    // info.texture_all = add_texture(textures, "all", game.texture_sheet, &game.next_texture_loc);
+    // info.texture_cross = add_texture(textures, "cross", game.texture_sheet, &game.next_texture_loc);
+    // info.texture_layer0 = add_texture(textures, "layer0", game.texture_sheet, &game.next_texture_loc);
+    // info.texture_vine = add_texture(textures, "vine", game.texture_sheet, &game.next_texture_loc);
+    // info.texture_flowerbed = add_texture(textures, "flowerbed", game.texture_sheet, &game.next_texture_loc);
 
-    cJSON *states = cJSON_GetObjectItemCaseSensitive(block, "states");
-    if (states != NULL) {
-      cJSON *state = states->child;
-      while (state != NULL) {
-        cJSON *state_id = cJSON_GetObjectItemCaseSensitive(state, "id");
-        if (state_id != NULL && cJSON_IsNumber(state_id)) {
-          int id = state_id->valueint;
-          if (id > max_id) {
-            max_id = id;
-          }
-          game.block_info[id] = info;
-        }
-        state = state->next;
-      }
-    }
-    cJSON_Delete(model);
+    // cJSON *states = cJSON_GetObjectItemCaseSensitive(block, "states");
+    // if (states != NULL) {
+    //   cJSON *state = states->child;
+    //   while (state != NULL) {
+    //     cJSON *state_id = cJSON_GetObjectItemCaseSensitive(state, "id");
+    //     if (state_id != NULL && cJSON_IsNumber(state_id)) {
+    //       int id = state_id->valueint;
+    //       if (id > max_id) {
+    //         max_id = id;
+    //       }
+    //       game.block_info[id] = info;
+    //     }
+    //     state = state->next;
+    //   }
+    // }
+    // cJSON_Delete(model);
     block = block->next;
+    cJSON_Delete(blockstate);
   }
 }
 
@@ -2421,6 +2513,8 @@ int main(int argc, char *argv[]) {
   init_mcapi(server_ip, port, uuid, access_token, username);
   frmwrk_setup_logging(WGPULogLevel_Warn);
   load_block_models();
+  save_image("texture_sheet.png", game.texture_sheet, TEXTURE_SIZE * TEXTURE_TILES, TEXTURE_SIZE * TEXTURE_TILES);
+
   init_glfw();
   init_surface();
   block_selected_renderer_init();
@@ -2436,8 +2530,6 @@ int main(int argc, char *argv[]) {
       .usage = WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst,
     }
   );
-
-  save_image("texture_sheet.png", game.texture_sheet, TEXTURE_SIZE * TEXTURE_TILES, TEXTURE_SIZE * TEXTURE_TILES);
 
   int width, height;
   glfwGetWindowSize(game.window, &width, &height);

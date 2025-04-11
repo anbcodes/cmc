@@ -360,34 +360,38 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           int q = section->num_quads * 4 * FLOATS_PER_VERTEX;
 
           BlockInfo info = abs(m.material) > 65535 ? block_info[0] : block_info[abs(m.material)]; // Fails here!!!!
-          int tile = info.texture;
-          if (tile == 0) {
-            tile = info.texture_all;
+          int tile = 0;
+          if (info.mesh.num_elements > 0) {
+            tile = info.mesh.elements[0]->up_texture;
           }
-          if (tile == 0) {
-            tile = info.texture_cross;
-          }
-          if (tile == 0) {
-            tile = info.texture_layer0;
-          }
-          if (tile == 0) {
-            tile = info.texture_vine;
-          }
-          if (tile == 0) {
-            tile = info.texture_flowerbed;
-          }
-          if (d == 1 && info.texture_end != 0) {
-            tile = info.texture_end;
-          }
-          if (m.material < 0 && d == 1 && info.texture_bottom != 0) {
-            tile = info.texture_bottom;
-          }
-          if (m.material > 0 && d == 1 && info.texture_top != 0) {
-            tile = info.texture_top;
-          }
-          if (d != 1 && info.texture_side != 0) {
-            tile = info.texture_side;
-          }
+          // int tile = info.texture;
+          // if (tile == 0) {
+          //   tile = info.texture_all;
+          // }
+          // if (tile == 0) {
+          //   tile = info.texture_cross;
+          // }
+          // if (tile == 0) {
+          //   tile = info.texture_layer0;
+          // }
+          // if (tile == 0) {
+          //   tile = info.texture_vine;
+          // }
+          // if (tile == 0) {
+          //   tile = info.texture_flowerbed;
+          // }
+          // if (d == 1 && info.texture_end != 0) {
+          //   tile = info.texture_end;
+          // }
+          // if (m.material < 0 && d == 1 && info.texture_bottom != 0) {
+          //   tile = info.texture_bottom;
+          // }
+          // if (m.material > 0 && d == 1 && info.texture_top != 0) {
+          //   tile = info.texture_top;
+          // }
+          // if (d != 1 && info.texture_side != 0) {
+          //   tile = info.texture_side;
+          // }
 
           // Get the biome color
           vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};

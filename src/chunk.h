@@ -30,6 +30,7 @@ typedef struct MeshCuboid {
 typedef struct Mesh {
   vec3 rotation;
   MeshCuboid** elements;
+  size_t num_elements;
 } Mesh;
 
 typedef struct BlockInfo {

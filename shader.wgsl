@@ -4,7 +4,8 @@ struct Uniforms {
   internal_sky_max: f32,
 }
 
-const TEXTURE_TILES = 40.0f;
+// const TEXTURE_TILES = 40.0f;
+const TEXTURE_TILES = 400.0f;
 
 @group(0) @binding(0)
 var<uniform> uniforms: Uniforms;
