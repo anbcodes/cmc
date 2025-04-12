@@ -362,7 +362,7 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           BlockInfo info = abs(m.material) > 65535 ? block_info[0] : block_info[abs(m.material)]; // Fails here!!!!
           int tile = 0;
           if (info.mesh.num_elements > 0) {
-            tile = info.mesh.elements[0]->up_texture;
+            tile = info.mesh.elements[0].up_texture;
           }
           // int tile = info.texture;
           // if (tile == 0) {
@@ -414,9 +414,9 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           // Needed for grass overlay on the sides
           // Would need something like this for redstone and maybe a few other things
           int overlay_tile = 0;
-          if (d != 1 && info.texture_overlay != 0) {
-            overlay_tile = info.texture_overlay;
-          }
+          // if (d != 1 && info.texture_overlay != 0) {
+          //   overlay_tile = info.texture_overlay;
+          // }
           int normal = (m.material > 0 ? 1 : -1) * (d + 1);
           quads[q + 0] = base[0] + x[0];
           quads[q + 1] = base[1] + x[1];

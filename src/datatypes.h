@@ -1,6 +1,7 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #define ntohll(x) (((uint64_t)ntohl((x) & 0xFFFFFFFF) << 32) | ntohl((x) >> 32))
 
@@ -18,6 +19,7 @@ typedef Buffer String;
 
 String to_string(char* c_str);
 void print_string(String str);
+void fprint_string(FILE* fp, String str);
 
 void write_buffer_to_file(Buffer buf, const char* filename);
 

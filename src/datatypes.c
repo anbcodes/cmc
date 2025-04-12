@@ -53,8 +53,13 @@ String to_string(char *c_str) {
 }
 
 void print_string(String str) {
-  fflush(stdout);
   write(1, str.ptr, str.len);
+  fflush(stdout);
+}
+
+void fprint_string(FILE* fp, String str) {
+  fwrite(str.ptr, str.len, 1, fp);
+  fflush(stderr);
 }
 
 ResizeableBuffer create_resizeable_buffer() {

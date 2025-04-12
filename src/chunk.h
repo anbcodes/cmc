@@ -13,47 +13,36 @@
 typedef struct MeshCuboid {
   vec3 from;
   vec3 to;
-  int16_t up_texture;
+  uint16_t up_texture;
   vec4 up_uv;
-  int16_t down_texture;
+  uint16_t down_texture;
   vec4 down_uv;
-  int16_t north_texture;
+  uint16_t north_texture;
   vec4 north_uv;
-  int16_t south_texture;
+  uint16_t south_texture;
   vec4 south_uv;
-  int16_t east_texture;
+  uint16_t east_texture;
   vec4 east_uv;
-  int16_t west_texture;
+  uint16_t west_texture;
   vec4 west_uv;
 } MeshCuboid;
 
 typedef struct Mesh {
   vec3 rotation;
-  MeshCuboid** elements;
+  MeshCuboid* elements;
   size_t num_elements;
 } Mesh;
 
 typedef struct BlockInfo {
-  // The most common textures (and overlay for grass)
   String name;
   String type;
-  int16_t texture;
-  int16_t texture_all;
-  int16_t texture_top;
-  int16_t texture_bottom;
-  int16_t texture_end;
-  int16_t texture_side;
-  int16_t texture_overlay;
-  int16_t texture_cross;
-  int16_t texture_layer0;
-  int16_t texture_vine;
-  int16_t texture_flowerbed;
+  int state;
   bool transparent;
   bool passable;
   bool grass;
   bool foliage;
-  Mesh mesh;
   bool dry_foliage;
+  Mesh mesh;
 } BlockInfo;
 
 typedef struct BiomeInfo {
