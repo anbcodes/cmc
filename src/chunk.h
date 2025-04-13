@@ -10,21 +10,22 @@
 // So each chunk is 24 sections tall
 #define Y_SECTIONS 24
 
+typedef struct MeshFace {
+  vec4 uv;
+  uint16_t texture;
+  int tint_index;
+  bool cull;
+} MeshFace;
+
 typedef struct MeshCuboid {
   vec3 from;
   vec3 to;
-  uint16_t up_texture;
-  vec4 up_uv;
-  uint16_t down_texture;
-  vec4 down_uv;
-  uint16_t north_texture;
-  vec4 north_uv;
-  uint16_t south_texture;
-  vec4 south_uv;
-  uint16_t east_texture;
-  vec4 east_uv;
-  uint16_t west_texture;
-  vec4 west_uv;
+  MeshFace up;
+  MeshFace down;
+  MeshFace north;
+  MeshFace south;
+  MeshFace east;
+  MeshFace west;
 } MeshCuboid;
 
 typedef struct Mesh {
@@ -42,6 +43,7 @@ typedef struct BlockInfo {
   bool grass;
   bool foliage;
   bool dry_foliage;
+  bool fullblock;
   Mesh mesh;
 } BlockInfo;
 

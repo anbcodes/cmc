@@ -1772,6 +1772,12 @@ uint16_t lookup_model_texture(cJSON * textures, char *texture_name) {
   }
 
   if (texture_name[0] == '#') {
+    // if (!strcmp(texture_name, "#overlay")) {
+    //   cJSON *overlay = cJSON_GetObjectItemCaseSensitive(textures, "overlay");
+    //   if (overlay) {
+    //     DEBUG("Looking up overlay: %s", overlay->valuestring);
+    //   }
+    // }
     texture_name = cJSON_GetObjectItemCaseSensitive(textures, texture_name + 1)->valuestring;
     if (strncmp(texture_name, "minecraft:", 10) == 0) {
       texture_name += 10;
@@ -1784,7 +1790,7 @@ uint16_t lookup_model_texture(cJSON * textures, char *texture_name) {
     uint16_t texture_index = (texture_cache.buf.buffer.ptr[i-2] << 8) + texture_cache.buf.buffer.ptr[i-1];
     String str = {.ptr = texture_cache.buf.buffer.ptr + i - 3 - len + 1, .len = len};
     // DEBUG("Loop i=%d len=%d ind=%d str=%sb\n", i, len, texture_index, str);
-    if (strncmp((char*)str.ptr, texture_name, str.len) == 0) {
+    if (strings_equal(str, to_string(texture_name))) {
       found_index = texture_index;
       break;
     }
@@ -1792,9 +1798,15 @@ uint16_t lookup_model_texture(cJSON * textures, char *texture_name) {
   }
 
   if (found_index != -1) {
+    if (!strcmp(texture_name, "block/grass_block_side_overlay")) {
+      DEBUG("Overlay was already loaded");
+    }
     return found_index;
   }
 
+  if (!strcmp(texture_name, "block/grass_block_side_overlay")) {
+    DEBUG("Should be loading overlay");
+  }
   char fname[1000];
   snprintf(fname, 1000, "data/assets/minecraft/textures/%s.png", texture_name);
   uint16_t index = add_file_texture_to_image(fname, game.texture_sheet, &game.next_texture_loc);
@@ -1804,6 +1816,21 @@ uint16_t lookup_model_texture(cJSON * textures, char *texture_name) {
   write_byte(&texture_cache, str.len);
 
   return index;
+}
+
+void read_face_from_json(cJSON* faces, char* face_name, MeshFace* into, cJSON *textures) {
+  cJSON *face = cJSON_GetObjectItemCaseSensitive(faces, face_name);
+
+  if (face == NULL) {
+    return;
+  }
+
+  read_json_arr_as_vec4(into->uv, cJSON_GetObjectItemCaseSensitive(face, "uv"));
+  into->texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(face, "texture")->valuestring);
+  cJSON* tint_index_j = cJSON_GetObjectItemCaseSensitive(face, "tintindex");
+  into->tint_index = tint_index_j != NULL ? tint_index_j->valueint + 1 : 0;
+  // TODO: Figure out how cullface actually works
+  into->cull = cJSON_GetObjectItemCaseSensitive(face, "cullface") != NULL;
 }
 
 // Adds the elements array to the mesh, each element is a MeshCubiod
@@ -1843,37 +1870,12 @@ void add_elements_to_blockinfo(BlockInfo* info, cJSON* elements, cJSON* textures
     cubiod.to[1] = jto->child->next->valuedouble;
     cubiod.to[2] = jto->child->next->next->valuedouble;
 
-    cJSON *fup = cJSON_GetObjectItemCaseSensitive(jfaces, "up");
-    cJSON *fdown = cJSON_GetObjectItemCaseSensitive(jfaces, "down");
-    cJSON *fnorth = cJSON_GetObjectItemCaseSensitive(jfaces, "north");
-    cJSON *fsouth = cJSON_GetObjectItemCaseSensitive(jfaces, "south");
-    cJSON *feast = cJSON_GetObjectItemCaseSensitive(jfaces, "east");
-    cJSON *fwest = cJSON_GetObjectItemCaseSensitive(jfaces, "west");
-
-    if (fup) {
-      read_json_arr_as_vec4(cubiod.up_uv, cJSON_GetObjectItemCaseSensitive(fup, "uv"));
-      cubiod.up_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(fup, "texture")->valuestring);
-    }
-    if (fdown) {
-      read_json_arr_as_vec4(cubiod.down_uv, cJSON_GetObjectItemCaseSensitive(fdown, "uv"));
-      cubiod.down_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(fdown, "texture")->valuestring);
-    }
-    if (fnorth) {
-      read_json_arr_as_vec4(cubiod.north_uv, cJSON_GetObjectItemCaseSensitive(fnorth, "uv"));
-      cubiod.north_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(fnorth, "texture")->valuestring);
-    }
-    if (fsouth) {
-      read_json_arr_as_vec4(cubiod.south_uv, cJSON_GetObjectItemCaseSensitive(fsouth, "uv"));
-      cubiod.south_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(fsouth, "texture")->valuestring);
-    }
-    if (feast) {
-      read_json_arr_as_vec4(cubiod.east_uv, cJSON_GetObjectItemCaseSensitive(feast, "uv"));
-      cubiod.east_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(feast, "texture")->valuestring);
-    }
-    if (fwest) {
-      read_json_arr_as_vec4(cubiod.west_uv, cJSON_GetObjectItemCaseSensitive(fwest, "uv"));
-      cubiod.west_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(fwest, "texture")->valuestring);
-    }
+    read_face_from_json(jfaces, "up", &cubiod.up, textures);
+    read_face_from_json(jfaces, "down", &cubiod.down, textures);
+    read_face_from_json(jfaces, "north", &cubiod.north, textures);
+    read_face_from_json(jfaces, "south", &cubiod.south, textures);
+    read_face_from_json(jfaces, "east", &cubiod.east, textures);
+    read_face_from_json(jfaces, "west", &cubiod.west, textures);
 
     info->mesh.elements[cur_index] = cubiod;
 
@@ -2165,6 +2167,16 @@ void load_block_states(cJSON* block) {
         WARN("Should be multipart or variant");
         assert(false);
       }
+
+      // Calculate if it is a full block
+      info.fullblock = info.mesh.num_elements != 0;
+      for (size_t el = 0; el < info.mesh.num_elements; el++) {
+        if (!(glm_vec3_eq(info.mesh.elements[el].from, 0) && glm_vec3_eq(info.mesh.elements[el].to, 16))) {
+          info.fullblock = false;
+          break;
+        }
+      }
+
       // Save the block state
       if (id != -1) {
         game.block_info[id] = info;
@@ -2190,7 +2202,7 @@ void init_glfw() {
   if (!glfwInit()) exit(EXIT_FAILURE);
 
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-  game.window = glfwCreateWindow(640, 480, "cmc", NULL, NULL);
+  game.window = glfwCreateWindow(960, 720, "cmc!!!!!!!!!!!!!!!", NULL, NULL);
   assert(game.window);
 
   glfwSetKeyCallback(game.window, handle_glfw_key);

@@ -20,6 +20,7 @@ typedef Buffer String;
 String to_string(char* c_str);
 void print_string(String str);
 void fprint_string(FILE* fp, String str);
+bool strings_equal(String s1, String s2);
 
 void write_buffer_to_file(Buffer buf, const char* filename);
 

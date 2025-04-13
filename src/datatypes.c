@@ -62,6 +62,14 @@ void fprint_string(FILE* fp, String str) {
   fflush(stderr);
 }
 
+bool strings_equal(String s1, String s2) {
+  if (s1.len != s2.len) {
+    return false;
+  } else {
+    return strncmp((char*)s1.ptr, (char*)s2.ptr, s1.len) == 0;
+  }
+}
+
 ResizeableBuffer create_resizeable_buffer() {
   return (ResizeableBuffer){
     .buffer = create_buffer(16),

@@ -231,8 +231,8 @@ int face_material_between(int a, int b, BlockInfo *block_info) {
   }
   // At this point, neither a or b are air
   // TODO: Need to lookup block transparency
-  bool ta = block_info[abs(a)].transparent;
-  bool tb = block_info[abs(b)].transparent;
+  bool ta = block_info[abs(a)].transparent || !block_info[abs(a)].fullblock;
+  bool tb = block_info[abs(b)].transparent || !block_info[abs(b)].fullblock;
   if (!ta && !tb) {
     return 0;
   }
@@ -271,10 +271,135 @@ bool mask_equal(MaskInfo a, MaskInfo b) {
   return a.material == b.material && a.sky_light == b.sky_light && a.block_light == b.block_light;
 }
 
+void draw_quad(ChunkSection *section, vec3 base, vec3 x, vec3 du, vec3 dv, vec4 color, vec2 uv_base, vec2 uv_du, vec2 uv_dv, uint16_t texture, float sky_light, float block_light, int normal) {
+  int overlay_tile = 0;
+  int q = section->num_quads * 4 * FLOATS_PER_VERTEX;
+  quads[q + 0] = base[0] + x[0];
+  quads[q + 1] = base[1] + x[1];
+  quads[q + 2] = base[2] + x[2];
+  quads[q + 3] = color[0];
+  quads[q + 4] = color[1];
+  quads[q + 5] = color[2];
+  quads[q + 6] = color[3];
+  quads[q + 7] = uv_base[0] + uv_du[0] + uv_dv[0];
+  quads[q + 8] = uv_base[1] + uv_du[1] + uv_dv[1];
+  quads[q + 9] = texture;
+  quads[q + 10] = overlay_tile;
+  quads[q + 11] = sky_light;
+  quads[q + 12] = block_light;
+  quads[q + 13] = normal;
+  q += FLOATS_PER_VERTEX;
+  quads[q + 0] = base[0] + x[0] + du[0];
+  quads[q + 1] = base[1] + x[1] + du[1];
+  quads[q + 2] = base[2] + x[2] + du[2];
+  quads[q + 3] = color[0];
+  quads[q + 4] = color[1];
+  quads[q + 5] = color[2];
+  quads[q + 6] = color[3];
+  quads[q + 7] = uv_base[0] + uv_du[0];
+  quads[q + 8] = uv_base[1] + uv_du[1];
+  quads[q + 9] = texture;
+  quads[q + 10] = overlay_tile;
+  quads[q + 11] = sky_light;
+  quads[q + 12] = block_light;
+  quads[q + 13] = normal;
+  q += FLOATS_PER_VERTEX;
+  quads[q + 0] = base[0] + x[0] + du[0] + dv[0];
+  quads[q + 1] = base[1] + x[1] + du[1] + dv[1];
+  quads[q + 2] = base[2] + x[2] + du[2] + dv[2];
+  quads[q + 3] = color[0];
+  quads[q + 4] = color[1];
+  quads[q + 5] = color[2];
+  quads[q + 6] = color[3];
+  quads[q + 7] = uv_base[0];
+  quads[q + 8] = uv_base[1];
+  quads[q + 9] = texture;
+  quads[q + 10] = overlay_tile;
+  quads[q + 11] = sky_light;
+  quads[q + 12] = block_light;
+  quads[q + 13] = normal;
+  q += FLOATS_PER_VERTEX;
+  quads[q + 0] = base[0] + x[0] + dv[0];
+  quads[q + 1] = base[1] + x[1] + dv[1];
+  quads[q + 2] = base[2] + x[2] + dv[2];
+  quads[q + 3] = color[0];
+  quads[q + 4] = color[1];
+  quads[q + 5] = color[2];
+  quads[q + 6] = color[3];
+  quads[q + 7] = uv_base[0] + uv_dv[0];
+  quads[q + 8] = uv_base[1] + uv_dv[1];
+  quads[q + 9] = texture;
+  quads[q + 10] = overlay_tile;
+  quads[q + 11] = sky_light;
+  quads[q + 12] = block_light;
+  quads[q + 13] = normal;
+  q += FLOATS_PER_VERTEX;
+  section->num_quads += 1;
+}
+
+void draw_cubiod(ChunkSection *section, vec3 base, int bx, int by, int bz, MeshCuboid element) {
+  vec3 b = {bx, by, bz};
+  vec3 from, to;
+  glm_vec3_copy(element.from, from);
+  glm_vec3_copy(element.to, to);
+  vec3 x;
+  glm_vec3_scale(from, 1.0/16.0, x);
+  glm_vec3_add(x, b, x);
+  vec3 x_end;
+  glm_vec3_scale(to, 1.0/16.0, x_end);
+  glm_vec3_add(x_end, b, x_end);
+  vec3 delta;
+  glm_vec3_sub(x_end, x, delta);
+  vec3 dv = {0};
+  vec3 du = {0};
+  uint16_t texture;
+  vec4 color = {1.0, 1.0, 1.0, 1.0};
+  float sky_light = 1.0;
+  float block_light = 1.0;
+  float normal = 1.0;
+  vec4 uv;
+  vec2 uv_base, uv_du, uv_dv;
+
+  dv[0] = delta[0];
+  du[1] = delta[1];
+  texture = element.north.texture;
+  glm_vec4_copy(element.north.uv, uv);
+  glm_vec4_scale(uv, 1.0/16.0, uv);
+  uv_base[0] = uv[0];
+  uv_base[1] = uv[1];
+  uv_du[0] = uv[2] - uv[0];
+  uv_du[1] = 0;
+  uv_dv[0] = 0;
+  uv_dv[1] = uv[2] - uv[0];
+
+  draw_quad(section, base, x, du, dv, color, uv_base, uv_du, uv_dv, texture, sky_light, block_light, normal);
+
+  x[2] = x[2] + delta[2];
+  dv[0] = delta[0];
+  dv[1] = 0;
+  dv[2] = 0;
+  dv[0] = 0;
+  du[1] = delta[1];
+  dv[2] = 0;
+  texture = element.south.texture;
+  glm_vec4_copy(element.south.uv, uv);
+  glm_vec4_scale(uv, 1.0/16.0, uv);
+  uv_base[0] = uv[0];
+  uv_base[1] = uv[1];
+  uv_du[0] = uv[2] - uv[0];
+  uv_du[1] = 0;
+  uv_dv[0] = 0;
+  uv_dv[1] = uv[2] - uv[0];
+
+  draw_quad(section, base, x, du, dv, color, uv_base, uv_du, uv_dv, texture, sky_light, block_light, normal);
+}
+
 void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3], BlockInfo *block_info, BiomeInfo *biome_info, WGPUDevice device) {
   section->num_quads = 0;
   MaskInfo mask[16 * 16];
   vec3 base = {section->x * CHUNK_SIZE, section->y * CHUNK_SIZE, section->z * CHUNK_SIZE};
+
+  // Create full blocks
   for (int d = 0; d < 3; d += 1) {
     int u = (d + 1) % 3;
     int v = (d + 2) % 3;
@@ -357,133 +482,191 @@ void chunk_section_update_mesh(ChunkSection *section, ChunkSection *neighbors[3]
           du[u] = w;
           int dv[3] = {0};
           dv[v] = h;
-          int q = section->num_quads * 4 * FLOATS_PER_VERTEX;
 
           BlockInfo info = abs(m.material) > 65535 ? block_info[0] : block_info[abs(m.material)]; // Fails here!!!!
-          int tile = 0;
-          if (info.mesh.num_elements > 0) {
-            tile = info.mesh.elements[0].up_texture;
-          }
-          // int tile = info.texture;
-          // if (tile == 0) {
-          //   tile = info.texture_all;
-          // }
-          // if (tile == 0) {
-          //   tile = info.texture_cross;
-          // }
-          // if (tile == 0) {
-          //   tile = info.texture_layer0;
-          // }
-          // if (tile == 0) {
-          //   tile = info.texture_vine;
-          // }
-          // if (tile == 0) {
-          //   tile = info.texture_flowerbed;
-          // }
-          // if (d == 1 && info.texture_end != 0) {
-          //   tile = info.texture_end;
-          // }
-          // if (m.material < 0 && d == 1 && info.texture_bottom != 0) {
-          //   tile = info.texture_bottom;
-          // }
-          // if (m.material > 0 && d == 1 && info.texture_top != 0) {
-          //   tile = info.texture_top;
-          // }
-          // if (d != 1 && info.texture_side != 0) {
-          //   tile = info.texture_side;
-          // }
 
-          // Get the biome color
-          vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
-          ivec3 biome_x = {floor(x[0] / 4.0), floor(x[1] / 4.0), floor(x[2] / 4.0)};
-          int biome_index = section->biome_data[biome_x[0] + 4 * (biome_x[2] + 4 * biome_x[1])];
-          BiomeInfo biome = biome_info[biome_index];
-          if (info.grass) {
-            // Don't set the grass color for the bottom of the block
-            if (!(d == 1 && m.material < 0)) {
-              glm_vec3_copy(biome.grass_color, color);
+          for (size_t el = 0; el < info.mesh.num_elements; el++) {
+            MeshFace face = {};
+            if (info.fullblock) {
+              if (d == 1 && m.material > 0) {
+                face = info.mesh.elements[el].up;
+              } else if (d == 1 && m.material < 0) {
+                face = info.mesh.elements[el].down;
+              } else if (d == 0 && m.material > 0) {
+                face = info.mesh.elements[el].north;
+              } else if (d == 0 && m.material < 0) {
+                face = info.mesh.elements[el].south;
+              } else if (d == 2 && m.material > 0) {
+                face = info.mesh.elements[el].east;
+              } else if (d == 2 && m.material < 0) {
+                face = info.mesh.elements[el].west;
+              } else {
+                face = info.mesh.elements[el].up;
+              }
             }
-          }
-          if (info.foliage) {
-            glm_vec3_copy(biome.foliage_color, color);
-          }
-          if (info.dry_foliage) {
-            glm_vec3_copy(biome.dry_foliage_color, color);
-          }
 
-          // Needed for grass overlay on the sides
-          // Would need something like this for redstone and maybe a few other things
-          int overlay_tile = 0;
-          // if (d != 1 && info.texture_overlay != 0) {
-          //   overlay_tile = info.texture_overlay;
-          // }
-          int normal = (m.material > 0 ? 1 : -1) * (d + 1);
-          quads[q + 0] = base[0] + x[0];
-          quads[q + 1] = base[1] + x[1];
-          quads[q + 2] = base[2] + x[2];
-          quads[q + 3] = color[0];
-          quads[q + 4] = color[1];
-          quads[q + 5] = color[2];
-          quads[q + 6] = color[3];
-          quads[q + 7] = w;
-          quads[q + 8] = h;
-          quads[q + 9] = tile;
-          quads[q + 10] = overlay_tile;
-          quads[q + 11] = m.sky_light / 15.0f;
-          quads[q + 12] = m.block_light / 15.0f;
-          quads[q + 13] = normal;
-          q += FLOATS_PER_VERTEX;
-          quads[q + 0] = base[0] + x[0] + du[0];
-          quads[q + 1] = base[1] + x[1] + du[1];
-          quads[q + 2] = base[2] + x[2] + du[2];
-          quads[q + 3] = color[0];
-          quads[q + 4] = color[1];
-          quads[q + 5] = color[2];
-          quads[q + 6] = color[3];
-          quads[q + 7] = 0.0f;
-          quads[q + 8] = h;
-          quads[q + 9] = tile;
-          quads[q + 10] = overlay_tile;
-          quads[q + 11] = m.sky_light / 15.0f;
-          quads[q + 12] = m.block_light / 15.0f;
-          quads[q + 13] = normal;
-          q += FLOATS_PER_VERTEX;
-          quads[q + 0] = base[0] + x[0] + du[0] + dv[0];
-          quads[q + 1] = base[1] + x[1] + du[1] + dv[1];
-          quads[q + 2] = base[2] + x[2] + du[2] + dv[2];
-          quads[q + 3] = color[0];
-          quads[q + 4] = color[1];
-          quads[q + 5] = color[2];
-          quads[q + 6] = color[3];
-          quads[q + 7] = 0.0f;
-          quads[q + 8] = 0.0f;
-          quads[q + 9] = tile;
-          quads[q + 10] = overlay_tile;
-          quads[q + 11] = m.sky_light / 15.0f;
-          quads[q + 12] = m.block_light / 15.0f;
-          quads[q + 13] = normal;
-          q += FLOATS_PER_VERTEX;
-          quads[q + 0] = base[0] + x[0] + dv[0];
-          quads[q + 1] = base[1] + x[1] + dv[1];
-          quads[q + 2] = base[2] + x[2] + dv[2];
-          quads[q + 3] = color[0];
-          quads[q + 4] = color[1];
-          quads[q + 5] = color[2];
-          quads[q + 6] = color[3];
-          quads[q + 7] = w;
-          quads[q + 8] = 0.0f;
-          quads[q + 9] = tile;
-          quads[q + 10] = overlay_tile;
-          quads[q + 11] = m.sky_light / 15.0f;
-          quads[q + 12] = m.block_light / 15.0f;
-          quads[q + 13] = normal;
-          section->num_quads += 1;
+            if (!face.texture) {
+              continue;
+            }
 
+            // int tile = info.texture;
+            // if (tile == 0) {
+            //   tile = info.texture_all;
+            // }
+            // if (tile == 0) {
+            //   tile = info.texture_cross;
+            // }
+            // if (tile == 0) {
+            //   tile = info.texture_layer0;
+            // }
+            // if (tile == 0) {
+            //   tile = info.texture_vine;
+            // }
+            // if (tile == 0) {
+            //   tile = info.texture_flowerbed;
+            // }
+            // if (d == 1 && info.texture_end != 0) {
+            //   tile = info.texture_end;
+            // }
+            // if (m.material < 0 && d == 1 && info.texture_bottom != 0) {
+            //   tile = info.texture_bottom;
+            // }
+            // if (m.material > 0 && d == 1 && info.texture_top != 0) {
+            //   tile = info.texture_top;
+            // }
+            // if (d != 1 && info.texture_side != 0) {
+            //   tile = info.texture_side;
+            // }
+
+            // Get the biome color
+            vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
+            ivec3 biome_x = {floor(x[0] / 4.0), floor(x[1] / 4.0), floor(x[2] / 4.0)};
+            int biome_index = section->biome_data[biome_x[0] + 4 * (biome_x[2] + 4 * biome_x[1])];
+            BiomeInfo biome = biome_info[biome_index];
+            if (face.tint_index == 1) {
+              if (info.grass) {
+                glm_vec3_copy(biome.grass_color, color);
+              } else if (info.foliage) {
+                glm_vec3_copy(biome.foliage_color, color);
+              } else if (info.dry_foliage) {
+                glm_vec3_copy(biome.dry_foliage_color, color);
+              }
+            }
+            // if (info.grass) {
+            //   // Don't set the grass color for the bottom of the block
+            //   if (!(d == 1 && m.material < 0)) {
+            //     glm_vec3_copy(biome.grass_color, color);
+            //   }
+            // }
+            // if (info.foliage) {
+            //   glm_vec3_copy(biome.foliage_color, color);
+            // }
+            // if (info.dry_foliage) {
+            //   glm_vec3_copy(biome.dry_foliage_color, color);
+            // }
+
+            // Needed for grass overlay on the sides
+            // Would need something like this for redstone and maybe a few other things
+            // int overlay_tile = 0;
+            // if (d != 1 && info.texture_overlay != 0) {
+            //   overlay_tile = info.texture_overlay;
+            // }
+            //
+
+            int normal = (m.material > 0 ? 1 : -1) * (d + 1);
+            vec4 uv = {0, 0, w, h};
+            vec2 uv_base = {uv[0], uv[1]};
+            vec2 uv_dv = {uv[2] - uv[0], 0};
+            vec2 uv_du = {0, uv[3] - uv[1]};
+
+            vec3 vec_x = {x[0], x[1], x[2]};
+            vec3 vec_du = {du[0], du[1], du[2]};
+            vec3 vec_dv = {dv[0], dv[1], dv[2]};
+            draw_quad(section, base, vec_x, vec_du, vec_dv, color, uv_base, uv_du, uv_dv, face.texture, m.sky_light / 15.0f, m.block_light / 15.0f, normal);
+
+            // quads[q + 0] = base[0] + x[0];
+            // quads[q + 1] = base[1] + x[1];
+            // quads[q + 2] = base[2] + x[2];
+            // quads[q + 3] = color[0];
+            // quads[q + 4] = color[1];
+            // quads[q + 5] = color[2];
+            // quads[q + 6] = color[3];
+            // quads[q + 7] = w;
+            // quads[q + 8] = h;
+            // quads[q + 9] = face.texture;
+            // quads[q + 10] = overlay_tile;
+            // quads[q + 11] = m.sky_light / 15.0f;
+            // quads[q + 12] = m.block_light / 15.0f;
+            // quads[q + 13] = normal;
+            // q += FLOATS_PER_VERTEX;
+            // quads[q + 0] = base[0] + x[0] + du[0];
+            // quads[q + 1] = base[1] + x[1] + du[1];
+            // quads[q + 2] = base[2] + x[2] + du[2];
+            // quads[q + 3] = color[0];
+            // quads[q + 4] = color[1];
+            // quads[q + 5] = color[2];
+            // quads[q + 6] = color[3];
+            // quads[q + 7] = 0.0f;
+            // quads[q + 8] = h;
+            // quads[q + 9] = face.texture;
+            // quads[q + 10] = overlay_tile;
+            // quads[q + 11] = m.sky_light / 15.0f;
+            // quads[q + 12] = m.block_light / 15.0f;
+            // quads[q + 13] = normal;
+            // q += FLOATS_PER_VERTEX;
+            // quads[q + 0] = base[0] + x[0] + du[0] + dv[0];
+            // quads[q + 1] = base[1] + x[1] + du[1] + dv[1];
+            // quads[q + 2] = base[2] + x[2] + du[2] + dv[2];
+            // quads[q + 3] = color[0];
+            // quads[q + 4] = color[1];
+            // quads[q + 5] = color[2];
+            // quads[q + 6] = color[3];
+            // quads[q + 7] = 0.0f;
+            // quads[q + 8] = 0.0f;
+            // quads[q + 9] = face.texture;
+            // quads[q + 10] = overlay_tile;
+            // quads[q + 11] = m.sky_light / 15.0f;
+            // quads[q + 12] = m.block_light / 15.0f;
+            // quads[q + 13] = normal;
+            // q += FLOATS_PER_VERTEX;
+            // quads[q + 0] = base[0] + x[0] + dv[0];
+            // quads[q + 1] = base[1] + x[1] + dv[1];
+            // quads[q + 2] = base[2] + x[2] + dv[2];
+            // quads[q + 3] = color[0];
+            // quads[q + 4] = color[1];
+            // quads[q + 5] = color[2];
+            // quads[q + 6] = color[3];
+            // quads[q + 7] = w;
+            // quads[q + 8] = 0.0f;
+            // quads[q + 9] = face.texture;
+            // quads[q + 10] = overlay_tile;
+            // quads[q + 11] = m.sky_light / 15.0f;
+            // quads[q + 12] = m.block_light / 15.0f;
+            // quads[q + 13] = normal;
+            // q += FLOATS_PER_VERTEX;
+            // section->num_quads += 1;
+          }
           // Zero out mask
           for (int l = 0; l < h; l += 1) {
             for (int k = 0; k < w; k += 1) {
               mask[(j + l) + CHUNK_SIZE * (i + k)].material = 0;
             }
+          }
+        }
+      }
+    }
+  }
+
+  // Create non-full blocks
+
+  for (int x = 0; x < CHUNK_SIZE; x++) {
+    for (int y = 0; y < CHUNK_SIZE; y++) {
+      for (int z = 0; z < CHUNK_SIZE; z++) {
+        int state = section->data[x + CHUNK_SIZE * (z + CHUNK_SIZE * y)];
+        BlockInfo info = block_info[state];
+        if (!info.fullblock) {
+          for (size_t el = 0; el < info.mesh.num_elements; el++) {
+            draw_cubiod(section, base, x, y, z, info.mesh.elements[el]);
           }
         }
       }
