@@ -62,6 +62,33 @@ typedef struct BiomeInfo {
   vec3 dry_foliage_color;
 } BiomeInfo;
 
+#pragma pack(push, 1)
+typedef struct ChunkVertex {
+  vec3 position;
+  vec4 color;
+  vec2 coord;
+  float material;
+  float overlay_material;
+  float sky_light;
+  float block_light;
+  float normal;
+} ChunkVertex;
+#pragma pack(pop)
+
+
+typedef struct CompressedChunkVertex {
+  vec3 position;
+  uint16_t material;
+  uint8_t color_r;
+  uint8_t color_g;
+  uint8_t color_b;
+  uint8_t color_a;
+  unsigned int sky_light : 4;
+  unsigned int block_light : 4;
+  int normal : 2;
+  vec2 coord;
+} CompressedChunkVertex;
+
 typedef struct ChunkSection {
   int x;
   int y;

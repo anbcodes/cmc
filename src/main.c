@@ -6,6 +6,8 @@
 #include <cglm/cglm.h>
 #include <wgpu.h>
 
+#include "cglm/affine-post.h"
+#include "cglm/mat4.h"
 #include "logging.h"
 #include "cJSON.h"
 #include "chunk.h"
@@ -16,6 +18,7 @@
 #include "mcapi/mcapi.h"
 #include "mcapi/protocol.h"
 #include "nbt.h"
+#include "webgpu.h"
 
 #if defined(GLFW_EXPOSE_NATIVE_COCOA)
 #include <Foundation/Foundation.h>
@@ -1150,6 +1153,8 @@ void chunk_renderer_init() {
       },
       .primitive = (const WGPUPrimitiveState){
         .topology = WGPUPrimitiveTopology_TriangleList,
+        .frontFace = WGPUFrontFace_CCW,
+        .cullMode = WGPUCullMode_Back,
       },
       .multisample = (const WGPUMultisampleState){
         .count = 1,
@@ -1833,8 +1838,8 @@ void read_face_from_json(cJSON* faces, char* face_name, MeshFace* into, cJSON *t
   into->cull = cJSON_GetObjectItemCaseSensitive(face, "cullface") != NULL;
 }
 
-// Adds the elements array to the mesh, each element is a MeshCubiod
-void add_elements_to_blockinfo(BlockInfo* info, cJSON* elements, cJSON* textures) {
+// Adds the elements array to the mesh, each element is a MeshCubiod. Returns the number of elements added.
+int add_elements_to_blockinfo(BlockInfo* info, cJSON* elements, cJSON* textures) {
   size_t old_count = info->mesh.num_elements;
   info->mesh.num_elements = old_count + cJSON_GetArraySize(elements);
   int cur_index = 0;
@@ -1854,7 +1859,7 @@ void add_elements_to_blockinfo(BlockInfo* info, cJSON* elements, cJSON* textures
   }
   // DEBUG("Elements for %sb: %d", info->name, info->mesh.num_elements);
   if (info->mesh.num_elements == 0) {
-    return;
+    return 0;
   }
   cJSON *cur_element = elements->child;
   while (cur_element) {
@@ -1884,6 +1889,7 @@ void add_elements_to_blockinfo(BlockInfo* info, cJSON* elements, cJSON* textures
     cur_element = cur_element->next;
     cur_index += 1;
   }
+  return info->mesh.num_elements - old_count;
 }
 
 void load_model(cJSON* model_spec, BlockInfo* info) {
@@ -1906,7 +1912,7 @@ void load_model(cJSON* model_spec, BlockInfo* info) {
     return;
   }
   // Read the hierarchy
-  bool read_elements = false;
+  int num_read_elements = 0;
   cJSON *textures = cJSON_CreateObject();
   cJSON *parent_model = model;
   while (parent_model) {
@@ -1928,9 +1934,8 @@ void load_model(cJSON* model_spec, BlockInfo* info) {
 
     // Other than that, it's just parsing the elements
     cJSON* elements = cJSON_GetObjectItemCaseSensitive(parent_model, "elements");
-    if (elements != NULL && !read_elements) {
-      add_elements_to_blockinfo(info, cJSON_GetObjectItemCaseSensitive(parent_model, "elements"), textures);
-      read_elements = true;
+    if (elements != NULL && num_read_elements == 0) {
+      num_read_elements = add_elements_to_blockinfo(info, cJSON_GetObjectItemCaseSensitive(parent_model, "elements"), textures);
     }
 
     cJSON *parent_item = cJSON_GetObjectItemCaseSensitive(parent_model, "parent");
@@ -1950,6 +1955,53 @@ void load_model(cJSON* model_spec, BlockInfo* info) {
   }
   cJSON_Delete(textures);
 
+  // Perform rotation
+  mat4 transform = GLM_MAT4_IDENTITY_INIT;
+  cJSON *y_rotation_j = cJSON_GetObjectItemCaseSensitive(model_spec, "y");
+  int y_rotation = 0;
+  if (y_rotation_j != NULL) {
+    y_rotation = y_rotation_j->valueint;
+  }
+
+  for (size_t i = info->mesh.num_elements - num_read_elements; i < info->mesh.num_elements; i++) {
+    MeshCuboid* el = &info->mesh.elements[i];
+    float fx = el->from[0];
+    float fz = el->from[2];
+    float tx = el->to[0];
+    float tz = el->to[2];
+    if (y_rotation == 90) {
+      MeshFace north = el->north;
+      el->north = el->east;
+      el->east = el->south;
+      el->south = el->west;
+      el->west = north;
+      el->from[0] = fmin(-(fz - 8) + 8, -(tz - 8) + 8);
+      el->from[2] = fmin(fx, tx);
+      el->to[0] = fmax(-(fz - 8) + 8, -(tz - 8) + 8);;
+      el->to[2] = fmax(fx, tx);
+    } else if (y_rotation == 180) {
+      MeshFace north = el->north;
+      el->north = el->south;
+      el->south = north;
+      MeshFace east = el->east;
+      el->east = el->west;
+      el->west = east;
+      el->from[0] = fmin(-(fx - 8) + 8, -(tx - 8) + 8);
+      el->from[2] = fmin(-(fz - 8) + 8, -(tz - 8) + 8);
+      el->to[0] = fmax(-(fx - 8) + 8, -(tx - 8) + 8);
+      el->to[2] = fmax(-(fz - 8) + 8, -(tz - 8) + 8);
+    } else if (y_rotation == 270) {
+      MeshFace north = el->north;
+      el->north = el->west;
+      el->west = el->south;
+      el->south = el->east;
+      el->east = north;
+      el->from[0] = fmin(fz, tz);
+      el->from[2] = fmin(-(fx - 8) + 8, -(tx - 8) + 8);
+      el->to[0] = fmax(fz, tz);
+      el->to[2] = fmax(-(fx - 8) + 8, -(tx - 8) + 8);
+    }
+  }
 }
 
 void load_multipart_state(cJSON *state, BlockInfo* info, cJSON *multipart) {
@@ -2117,7 +2169,8 @@ void load_block_states(cJSON* block) {
   if (
     strcmp(type->valuestring, "minecraft:tall_grass") == 0 ||
     strcmp(type->valuestring, "minecraft:double_plant") == 0 ||
-    strcmp(type->valuestring, "minecraft:sugar_cane") == 0
+    strcmp(type->valuestring, "minecraft:sugar_cane") == 0 ||
+    strcmp(type->valuestring, "minecraft:bush") == 0
   ) {
     shared_info.passable = true;
     shared_info.transparent = true;
