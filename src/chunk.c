@@ -233,8 +233,10 @@ int face_material_between(int a, int b, BlockInfo *block_info) {
   }
   // At this point, neither a or b are air
   // TODO: Need to lookup block transparency
-  bool ta = block_info[abs(a)].transparent || !block_info[abs(a)].fullblock;
-  bool tb = block_info[abs(b)].transparent || !block_info[abs(b)].fullblock;
+  bool a_full = block_info[abs(a)].fullblock;
+  bool b_full = block_info[abs(b)].fullblock;
+  bool ta = block_info[abs(a)].transparent || !a_full;
+  bool tb = block_info[abs(b)].transparent || !b_full;
   if (!ta && !tb) {
     return 0;
   }
@@ -244,8 +246,11 @@ int face_material_between(int a, int b, BlockInfo *block_info) {
   if (!ta && tb) {
     return a;
   }
-  // Arbitrary, both are semi-transparent blocks
-  return a;
+  // Give preference to a full block
+  if (a_full) {
+    return a;
+  }
+  return -b;
 }
 
 void chunk_section_update_mesh_if_internal(ChunkSection *section, World *world, BlockInfo *block_info, BiomeInfo *biome_info, WGPUDevice device) {
@@ -425,10 +430,10 @@ void cubiod(ChunkSection *section, vec3 base, MeshCuboid element, BlockInfo *blo
       {a0[0], a0[1], a1[2]}, // 3
     };
     vec2 coord[4] = {
-      {uv[0], uv[1]},
-      {uv[2], uv[1]},
-      {uv[2], uv[3]},
       {uv[0], uv[3]},
+      {uv[2], uv[3]},
+      {uv[2], uv[1]},
+      {uv[0], uv[1]},
     };
 
     for (int i = 0; i < 4; i++) {
@@ -449,10 +454,10 @@ void cubiod(ChunkSection *section, vec3 base, MeshCuboid element, BlockInfo *blo
       {a0[0], a1[1], a0[2]}, // 3
     };
     vec2 coord[4] = {
-      {uv[2], uv[3]}, // 2
-      {uv[2], uv[1]}, // 1
-      {uv[0], uv[1]}, // 0
-      {uv[0], uv[3]}, // 3
+      {uv[0], uv[1]}, // 2
+      {uv[0], uv[3]}, // 1
+      {uv[2], uv[3]}, // 0
+      {uv[2], uv[1]}, // 3
     };
 
     for (int i = 0; i < 4; i++) {
@@ -473,10 +478,10 @@ void cubiod(ChunkSection *section, vec3 base, MeshCuboid element, BlockInfo *blo
       {a0[0], a1[1], a1[2]}, // 3
     };
     vec2 coord[4] = {
-      {uv[0], uv[1]}, // 0
-      {uv[2], uv[1]}, // 1
-      {uv[2], uv[3]}, // 2
-      {uv[0], uv[3]}, // 3
+      {uv[0], uv[3]}, // 0
+      {uv[2], uv[3]}, // 1
+      {uv[2], uv[1]}, // 2
+      {uv[0], uv[1]}, // 3
     };
 
     for (int i = 0; i < 4; i++) {
@@ -521,10 +526,10 @@ void cubiod(ChunkSection *section, vec3 base, MeshCuboid element, BlockInfo *blo
       {a0[0], a0[1], a1[2]}, // 3
     };
     vec2 coord[4] = {
-      {uv[0], uv[1]}, // 0
-      {uv[2], uv[1]}, // 1
-      {uv[2], uv[3]}, // 2
-      {uv[0], uv[3]}, // 3
+      {uv[2], uv[1]}, // 0
+      {uv[0], uv[1]}, // 1
+      {uv[0], uv[3]}, // 2
+      {uv[2], uv[3]}, // 3
     };
 
     for (int i = 0; i < 4; i++) {

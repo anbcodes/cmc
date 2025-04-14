@@ -1978,6 +1978,9 @@ void load_model(cJSON* model_spec, BlockInfo* info) {
   }
   cJSON_Delete(textures);
 
+  // Uncomment to skip rotations
+  // return;
+
   // Perform rotation
   cJSON *y_rotation_j = cJSON_GetObjectItemCaseSensitive(model_spec, "y");
   int y_rotation = 0;
