@@ -432,10 +432,105 @@ void cubiod(ChunkSection *section, vec3 base, MeshCuboid element, BlockInfo *blo
     };
 
     for (int i = 0; i < 4; i++) {
-
       glm_vec3_add(base, pos[i], pos[i]);
     }
     quad(section, element.down.texture, element.down.tint_index != 0 ? block_color : no_color, sky_light, block_light, normal, pos, coord);
+  }
+  // North face
+  if (element.north.texture != 0) {
+    int normal = -3;
+    vec4 uv;
+    glm_vec4_scale(element.north.uv, 1.0/16.0, uv);
+
+    vec3 pos[4] = {
+      {a1[0], a1[1], a0[2]}, // 2
+      {a1[0], a0[1], a0[2]}, // 1
+      {a0[0], a0[1], a0[2]}, // 0
+      {a0[0], a1[1], a0[2]}, // 3
+    };
+    vec2 coord[4] = {
+      {uv[2], uv[3]}, // 2
+      {uv[2], uv[1]}, // 1
+      {uv[0], uv[1]}, // 0
+      {uv[0], uv[3]}, // 3
+    };
+
+    for (int i = 0; i < 4; i++) {
+      glm_vec3_add(base, pos[i], pos[i]);
+    }
+    quad(section, element.north.texture, element.north.tint_index != 0 ? block_color : no_color, sky_light, block_light, normal, pos, coord);
+  }
+  // South face
+  if (element.south.texture != 0) {
+    int normal = 3;
+    vec4 uv;
+    glm_vec4_scale(element.south.uv, 1.0/16.0, uv);
+
+    vec3 pos[4] = {
+      {a0[0], a0[1], a1[2]}, // 0
+      {a1[0], a0[1], a1[2]}, // 1
+      {a1[0], a1[1], a1[2]}, // 2
+      {a0[0], a1[1], a1[2]}, // 3
+    };
+    vec2 coord[4] = {
+      {uv[0], uv[1]}, // 0
+      {uv[2], uv[1]}, // 1
+      {uv[2], uv[3]}, // 2
+      {uv[0], uv[3]}, // 3
+    };
+
+    for (int i = 0; i < 4; i++) {
+      glm_vec3_add(base, pos[i], pos[i]);
+    }
+    quad(section, element.south.texture, element.south.tint_index != 0 ? block_color : no_color, sky_light, block_light, normal, pos, coord);
+  }
+  // East face
+  if (element.east.texture != 0) {
+    int normal = 1;
+    vec4 uv;
+    glm_vec4_scale(element.east.uv, 1.0/16.0, uv);
+
+    vec3 pos[4] = {
+      {a1[0], a0[1], a0[2]}, // 0
+      {a1[0], a1[1], a0[2]}, // 1
+      {a1[0], a1[1], a1[2]}, // 2
+      {a1[0], a0[1], a1[2]}, // 3
+    };
+    vec2 coord[4] = {
+      {uv[2], uv[3]}, // 2
+      {uv[2], uv[1]}, // 1
+      {uv[0], uv[1]}, // 0
+      {uv[0], uv[3]}, // 3
+    };
+
+    for (int i = 0; i < 4; i++) {
+      glm_vec3_add(base, pos[i], pos[i]);
+    }
+    quad(section, element.east.texture, element.east.tint_index != 0 ? block_color : no_color, sky_light, block_light, normal, pos, coord);
+  }
+  // West face
+  if (element.west.texture != 0) {
+    int normal = -1;
+    vec4 uv;
+    glm_vec4_scale(element.west.uv, 1.0/16.0, uv);
+
+    vec3 pos[4] = {
+      {a0[0], a1[1], a1[2]}, // 2
+      {a0[0], a1[1], a0[2]}, // 1
+      {a0[0], a0[1], a0[2]}, // 0
+      {a0[0], a0[1], a1[2]}, // 3
+    };
+    vec2 coord[4] = {
+      {uv[0], uv[1]}, // 0
+      {uv[2], uv[1]}, // 1
+      {uv[2], uv[3]}, // 2
+      {uv[0], uv[3]}, // 3
+    };
+
+    for (int i = 0; i < 4; i++) {
+      glm_vec3_add(base, pos[i], pos[i]);
+    }
+    quad(section, element.west.texture, element.west.tint_index != 0 ? block_color : no_color, sky_light, block_light, normal, pos, coord);
   }
 }
 

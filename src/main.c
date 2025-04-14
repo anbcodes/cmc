@@ -1892,6 +1892,29 @@ int add_elements_to_blockinfo(BlockInfo* info, cJSON* elements, cJSON* textures)
   return info->mesh.num_elements - old_count;
 }
 
+void rotate(float *x, float *y, int angle) {
+  float tx = *x;
+  float ty = *y;
+  if (angle == 90) {
+    *x = -(ty - 8) + 8;
+    *y = tx;
+  } else if (angle == 180) {
+    *x = -(tx - 8) + 8;
+    *y = -(ty - 8) + 8;
+  } else if (angle == 270) {
+    *x = ty;
+    *y = -(tx - 8) + 8;
+  }
+}
+
+void order(float *x, float *y) {
+  if (*x > *y) {
+    float temp = *x;
+    *x = *y;
+    *y = temp;
+  }
+}
+
 void load_model(cJSON* model_spec, BlockInfo* info) {
   char fname[1000];
 
@@ -1956,7 +1979,6 @@ void load_model(cJSON* model_spec, BlockInfo* info) {
   cJSON_Delete(textures);
 
   // Perform rotation
-  mat4 transform = GLM_MAT4_IDENTITY_INIT;
   cJSON *y_rotation_j = cJSON_GetObjectItemCaseSensitive(model_spec, "y");
   int y_rotation = 0;
   if (y_rotation_j != NULL) {
@@ -1965,20 +1987,29 @@ void load_model(cJSON* model_spec, BlockInfo* info) {
 
   for (size_t i = info->mesh.num_elements - num_read_elements; i < info->mesh.num_elements; i++) {
     MeshCuboid* el = &info->mesh.elements[i];
-    float fx = el->from[0];
-    float fz = el->from[2];
-    float tx = el->to[0];
-    float tz = el->to[2];
+    rotate(el->up.uv + 0, el->up.uv + 1, y_rotation);
+    rotate(el->up.uv + 2, el->up.uv + 3, y_rotation);
+    rotate(el->down.uv + 0, el->down.uv + 1, 360 - y_rotation);
+    rotate(el->down.uv + 2, el->down.uv + 3, 360 - y_rotation);
+    // rotate(el->north.uv + 0, el->north.uv + 1, y_rotation);
+    // rotate(el->north.uv + 2, el->north.uv + 3, y_rotation);
+    // rotate(el->south.uv + 0, el->south.uv + 1, y_rotation);
+    // rotate(el->south.uv + 2, el->south.uv + 3, y_rotation);
+    // rotate(el->east.uv + 0, el->east.uv + 1, y_rotation);
+    // rotate(el->east.uv + 2, el->east.uv + 3, y_rotation);
+    // rotate(el->west.uv + 0, el->west.uv + 1, y_rotation);
+    // rotate(el->west.uv + 2, el->west.uv + 3, y_rotation);
+    rotate(el->from + 0, el->from + 2, y_rotation);
+    rotate(el->to + 0, el->to + 2, y_rotation);
+    order(el->from + 0, el->to + 0);
+    order(el->from + 2, el->to + 2);
+
     if (y_rotation == 90) {
       MeshFace north = el->north;
       el->north = el->east;
       el->east = el->south;
       el->south = el->west;
       el->west = north;
-      el->from[0] = fmin(-(fz - 8) + 8, -(tz - 8) + 8);
-      el->from[2] = fmin(fx, tx);
-      el->to[0] = fmax(-(fz - 8) + 8, -(tz - 8) + 8);;
-      el->to[2] = fmax(fx, tx);
     } else if (y_rotation == 180) {
       MeshFace north = el->north;
       el->north = el->south;
@@ -1986,20 +2017,12 @@ void load_model(cJSON* model_spec, BlockInfo* info) {
       MeshFace east = el->east;
       el->east = el->west;
       el->west = east;
-      el->from[0] = fmin(-(fx - 8) + 8, -(tx - 8) + 8);
-      el->from[2] = fmin(-(fz - 8) + 8, -(tz - 8) + 8);
-      el->to[0] = fmax(-(fx - 8) + 8, -(tx - 8) + 8);
-      el->to[2] = fmax(-(fz - 8) + 8, -(tz - 8) + 8);
     } else if (y_rotation == 270) {
       MeshFace north = el->north;
       el->north = el->west;
       el->west = el->south;
       el->south = el->east;
       el->east = north;
-      el->from[0] = fmin(fz, tz);
-      el->from[2] = fmin(-(fx - 8) + 8, -(tx - 8) + 8);
-      el->to[0] = fmax(fz, tz);
-      el->to[2] = fmax(-(fx - 8) + 8, -(tx - 8) + 8);
     }
   }
 }
