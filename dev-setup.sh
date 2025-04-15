@@ -23,6 +23,12 @@ if [ ! -d lib/wgpu ]; then
   rm -rf wgpu.zip
 fi
 
+if [ ! -d lib/yyjson ]; then
+  echo "Downloading yyjson..."
+
+  git clone https://github.com/ibireme/yyjson.git lib/yyjson
+fi
+
 if [ ! -d "lib/glfw" ]; then
   echo "Downloading glfw..."
 

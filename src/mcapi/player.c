@@ -66,3 +66,20 @@ MCAPI_HANDLER(play, PTYPE_PLAY_CB_BLOCK_DESTRUCTION, set_block_destroy_stage, mc
 }), ({
   // No specific frees needed
 }))
+
+// =============== Inventory ===============
+
+// Todo: implement
+// Clientbound
+// [ ] Set Container Content https://minecraft.wiki/w/Java_Edition_protocol#Set_Container_Content
+// [ ] Set inventory slot https://minecraft.wiki/w/Java_Edition_protocol#Set_Player_Inventory_Slot
+// [ ] Set container slot https://minecraft.wiki/w/Java_Edition_protocol#Set_Container_Slot
+// [ ] Open Screen? https://minecraft.wiki/w/Java_Edition_protocol#Open_Screen
+// [ ] Set cursor item https://minecraft.wiki/w/Java_Edition_protocol#Set_Cursor_Item
+// [ ] Set Held Item? (clientbound) https://minecraft.wiki/w/Java_Edition_protocol#Set_Held_Item_(clientbound)
+//
+// Serverbound
+// [ ] Click Container https://minecraft.wiki/w/Java_Edition_protocol#Click_Container
+// [ ] Close Container https://minecraft.wiki/w/Java_Edition_protocol#Close_Container
+// [ ] Set Held Item (serverbound) https://minecraft.wiki/w/Java_Edition_protocol#Set_Held_Item_(serverbound)
+// [ ] Set Creative Mode Slot? https://minecraft.wiki/w/Java_Edition_protocol#Set_Creative_Mode_Slot

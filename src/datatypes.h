@@ -17,7 +17,9 @@ void print_buffer(Buffer str);
 
 typedef Buffer String;
 
-String to_string(char* c_str);
+String to_string(const char* c_str);
+String substr(String s, int start, int end);
+void copy_into_cstr(String string, char *c_str);
 void print_string(String str);
 void fprint_string(FILE* fp, String str);
 bool strings_equal(String s1, String s2);
@@ -56,3 +58,22 @@ typedef struct BitSet {
   int length;
   uint64_t* data;
 } BitSet;
+
+// HashMap
+typedef struct HashElement {
+  String key;
+  Buffer value;
+} HashElement;
+
+typedef struct HashMap {
+  HashElement* table;
+  size_t capacity;
+  size_t filled;
+} HashMap;
+
+HashMap* hashmap_create(int capacity);
+void hashmap_insert(HashMap* map, String key, Buffer value);
+void hashmap_resize(HashMap *map, int new_capacity);
+Buffer hashmap_get(const HashMap* map, String key);
+void hashmap_destroy_all_values(HashMap* map);
+void hashmap_destroy(HashMap* map);

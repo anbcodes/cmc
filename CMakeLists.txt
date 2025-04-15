@@ -5,6 +5,7 @@ project(cmc)
 add_subdirectory(lib/libdeflate)
 add_subdirectory(lib/glfw)
 add_subdirectory(lib/cglm)
+add_subdirectory(lib/yyjson)
 
 set (CMAKE_C_STANDARD 23)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -36,6 +37,7 @@ target_link_libraries(cmc PUBLIC curl)
 target_link_libraries(cmc PUBLIC libdeflate_static)
 target_link_libraries(cmc PUBLIC glfw)
 target_link_libraries(cmc PUBLIC cglm)
+target_link_libraries(cmc PRIVATE yyjson)
 
 
 target_include_directories(cmc PUBLIC "${CMAKE_SOURCE_DIR}/lib/libdeflate")

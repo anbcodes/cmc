@@ -1,15 +1,17 @@
 #include <assert.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <cglm/cglm.h>
 #include <wgpu.h>
+#include <yyjson.h>
 
 #include "cglm/affine-post.h"
 #include "cglm/mat4.h"
 #include "logging.h"
-#include "cJSON.h"
+// #include "cJSON.h"
 #include "chunk.h"
 #include "datatypes.h"
 #include "framework.h"
@@ -135,7 +137,7 @@ typedef struct Game {
   mcapiConnection *conn;
   unsigned char texture_sheet[TEXTURE_SIZE * TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_TILES * 4];
   int next_texture_loc;
-  cJSON *blocks;
+  yyjson_doc *blocks;
   double target_render_time;
   double last_render_time;
   double target_tick_time;
@@ -196,28 +198,8 @@ unsigned save_image(const char *filename, unsigned char *image, unsigned width, 
   return error;
 }
 
-cJSON *load_json(const char *filename) {
-  FILE *file = fopen(filename, "rb");
-  if (file == NULL) {
-    return NULL;
-  }
-
-  fseek(file, 0, SEEK_END);
-  long length = ftell(file);
-  fseek(file, 0, SEEK_SET);
-
-  char *buffer = malloc(length + 1);
-  if (buffer == NULL) {
-    fclose(file);
-    return NULL;
-  }
-
-  fread(buffer, 1, length, file);
-  buffer[length] = '\0';
-  fclose(file);
-
-  cJSON *json = cJSON_Parse(buffer);
-  free(buffer);
+yyjson_doc *load_json(const char *filename) {
+  yyjson_doc* json = yyjson_read_file(filename, 0, NULL, NULL);
 
   return json;
 }
@@ -1756,12 +1738,12 @@ void block_selected_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
   wgpuRenderPassEncoderDraw(render_pass_encoder, 18 * 4 * 2, 1, 0, 0);
 }
 
-void read_json_arr_as_vec4(vec4 dst, cJSON * src) {
+void read_json_arr_as_vec4(vec4 dst, yyjson_val * src) {
   if (src) {
-    dst[0] = src->child->valuedouble;
-    dst[1] = src->child->next->valuedouble;
-    dst[2] = src->child->next->next->valuedouble;
-    dst[3] = src->child->next->next->next->valuedouble;
+    dst[0] = yyjson_get_num(yyjson_arr_get(src, 0));
+    dst[1] = yyjson_get_num(yyjson_arr_get(src, 1));
+    dst[2] = yyjson_get_num(yyjson_arr_get(src, 2));
+    dst[3] = yyjson_get_num(yyjson_arr_get(src, 3));
   } else {
     dst[0] = 0;
     dst[1] = 0;
@@ -1770,22 +1752,24 @@ void read_json_arr_as_vec4(vec4 dst, cJSON * src) {
   }
 }
 
-uint16_t lookup_model_texture(cJSON * textures, char *texture_name) {
+uint16_t lookup_model_texture(const HashMap * textures, String texture_name) {
   static WritableBuffer texture_cache = { 0 };
   if (texture_cache.buf.buffer.ptr == NULL) {
     texture_cache = create_writable_buffer();
   }
 
-  if (texture_name[0] == '#') {
+  if (texture_name.ptr[0] == '#') {
     // if (!strcmp(texture_name, "#overlay")) {
-    //   cJSON *overlay = cJSON_GetObjectItemCaseSensitive(textures, "overlay");
+    //   yyjson_val* overlay = yyjson_obj_get(textures, "overlay");
     //   if (overlay) {
     //     DEBUG("Looking up overlay: %s", overlay->valuestring);
     //   }
     // }
-    texture_name = cJSON_GetObjectItemCaseSensitive(textures, texture_name + 1)->valuestring;
-    if (strncmp(texture_name, "minecraft:", 10) == 0) {
-      texture_name += 10;
+    DEBUG("Looking up %sb", substr(texture_name, 1, -1));
+    texture_name = hashmap_get(textures, substr(texture_name, 1, -1));
+    assert(texture_name.ptr != NULL);
+    if (strncmp((char*)texture_name.ptr, "minecraft:", 10) == 0) {
+      texture_name = substr(texture_name, 10, -1);
     }
   }
 
@@ -1795,7 +1779,7 @@ uint16_t lookup_model_texture(cJSON * textures, char *texture_name) {
     uint16_t texture_index = (texture_cache.buf.buffer.ptr[i-2] << 8) + texture_cache.buf.buffer.ptr[i-1];
     String str = {.ptr = texture_cache.buf.buffer.ptr + i - 3 - len + 1, .len = len};
     // DEBUG("Loop i=%d len=%d ind=%d str=%sb\n", i, len, texture_index, str);
-    if (strings_equal(str, to_string(texture_name))) {
+    if (strings_equal(str, texture_name)) {
       found_index = texture_index;
       break;
     }
@@ -1803,46 +1787,47 @@ uint16_t lookup_model_texture(cJSON * textures, char *texture_name) {
   }
 
   if (found_index != -1) {
-    if (!strcmp(texture_name, "block/grass_block_side_overlay")) {
+    if (!strings_equal(texture_name, to_string("block/grass_block_side_overlay"))) {
       DEBUG("Overlay was already loaded");
     }
     return found_index;
   }
 
-  if (!strcmp(texture_name, "block/grass_block_side_overlay")) {
+  if (!strings_equal(texture_name, to_string("block/grass_block_side_overlay"))) {
     DEBUG("Should be loading overlay");
   }
+  char temp[100];
+  copy_into_cstr(texture_name, temp);
   char fname[1000];
-  snprintf(fname, 1000, "data/assets/minecraft/textures/%s.png", texture_name);
+  snprintf(fname, 1000, "data/assets/minecraft/textures/%s.png", temp);
   uint16_t index = add_file_texture_to_image(fname, game.texture_sheet, &game.next_texture_loc);
-  String str = to_string(texture_name);
-  write_buffer(&texture_cache, str);
+  write_buffer(&texture_cache, texture_name);
   write_short(&texture_cache, index);
-  write_byte(&texture_cache, str.len);
+  write_byte(&texture_cache, texture_name.len);
 
   return index;
 }
 
-void read_face_from_json(cJSON* faces, char* face_name, MeshFace* into, cJSON *textures) {
-  cJSON *face = cJSON_GetObjectItemCaseSensitive(faces, face_name);
+void read_face_from_json(yyjson_val* faces, char* face_name, MeshFace* into, HashMap *textures) {
+  yyjson_val *face = yyjson_obj_get(faces, face_name);
 
   if (face == NULL) {
     return;
   }
 
-  read_json_arr_as_vec4(into->uv, cJSON_GetObjectItemCaseSensitive(face, "uv"));
-  into->texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(face, "texture")->valuestring);
-  cJSON* tint_index_j = cJSON_GetObjectItemCaseSensitive(face, "tintindex");
-  into->tint_index = tint_index_j != NULL ? tint_index_j->valueint + 1 : 0;
+  read_json_arr_as_vec4(into->uv, yyjson_obj_get(face, "uv"));
+  into->texture = lookup_model_texture(textures, to_string(yyjson_get_str(yyjson_obj_get(face, "texture"))));
+  yyjson_val* tint_index_j = yyjson_obj_get(face, "tintindex");
+  into->tint_index = tint_index_j != NULL ? yyjson_get_num(tint_index_j) + 1 : 0;
   // TODO: Figure out how cullface actually works
-  into->cull = cJSON_GetObjectItemCaseSensitive(face, "cullface") != NULL;
+  into->cull = yyjson_obj_get(face, "cullface") != NULL;
 }
 
 // Adds the elements array to the mesh, each element is a MeshCubiod. Returns the number of elements added.
-int add_elements_to_blockinfo(BlockInfo* info, cJSON* elements, cJSON* textures) {
+int add_elements_to_blockinfo(BlockInfo* info, yyjson_val* elements, HashMap* textures) {
   size_t old_count = info->mesh.num_elements;
-  info->mesh.num_elements = old_count + cJSON_GetArraySize(elements);
-  int cur_index = 0;
+  info->mesh.num_elements = old_count + yyjson_arr_size(elements);
+  size_t start_index = 0;
 
   if (old_count != 0) {
     // We need to copy the old elements
@@ -1851,7 +1836,7 @@ int add_elements_to_blockinfo(BlockInfo* info, cJSON* elements, cJSON* textures)
     info->mesh.elements = calloc(info->mesh.num_elements, sizeof(MeshCuboid));
     memcpy(info->mesh.elements, old, sizeof(MeshCuboid) * old_count);
 
-    cur_index = old_count;
+    start_index = old_count;
 
     free(old);
   } else {
@@ -1861,19 +1846,20 @@ int add_elements_to_blockinfo(BlockInfo* info, cJSON* elements, cJSON* textures)
   if (info->mesh.num_elements == 0) {
     return 0;
   }
-  cJSON *cur_element = elements->child;
-  while (cur_element) {
+  size_t arr_index, max;
+  yyjson_val* cur_element;
+  yyjson_arr_foreach(elements, arr_index, max, cur_element) {
     MeshCuboid cubiod = {0};
-    cJSON* jfrom = cJSON_GetObjectItemCaseSensitive(cur_element, "from");
-    cJSON* jto = cJSON_GetObjectItemCaseSensitive(cur_element, "to");
-    cJSON* jfaces = cJSON_GetObjectItemCaseSensitive(cur_element, "faces");
-    cubiod.from[0] = jfrom->child->valuedouble;
-    cubiod.from[1] = jfrom->child->next->valuedouble;
-    cubiod.from[2] = jfrom->child->next->next->valuedouble;
+    yyjson_val* jfrom = yyjson_obj_get(cur_element, "from");
+    yyjson_val* jto = yyjson_obj_get(cur_element, "to");
+    yyjson_val* jfaces = yyjson_obj_get(cur_element, "faces");
+    cubiod.from[0] = yyjson_get_num(yyjson_arr_get(jfrom, 0));
+    cubiod.from[1] = yyjson_get_num(yyjson_arr_get(jfrom, 1));
+    cubiod.from[2] = yyjson_get_num(yyjson_arr_get(jfrom, 2));
 
-    cubiod.to[0] = jto->child->valuedouble;
-    cubiod.to[1] = jto->child->next->valuedouble;
-    cubiod.to[2] = jto->child->next->next->valuedouble;
+    cubiod.to[0] = yyjson_get_num(yyjson_arr_get(jto, 0));
+    cubiod.to[1] = yyjson_get_num(yyjson_arr_get(jto, 1));
+    cubiod.to[2] = yyjson_get_num(yyjson_arr_get(jto, 2));
 
     read_face_from_json(jfaces, "up", &cubiod.up, textures);
     read_face_from_json(jfaces, "down", &cubiod.down, textures);
@@ -1882,13 +1868,9 @@ int add_elements_to_blockinfo(BlockInfo* info, cJSON* elements, cJSON* textures)
     read_face_from_json(jfaces, "east", &cubiod.east, textures);
     read_face_from_json(jfaces, "west", &cubiod.west, textures);
 
-    info->mesh.elements[cur_index] = cubiod;
-
-    // cubiod.up_texture = lookup_model_texture(textures, cJSON_GetObjectItemCaseSensitive(fup, "texture"));
-    // cubiod.up_texture = add_texture(textures, cJSON_GetObjectItemCaseSensitive(fup, "texture"));
-    cur_element = cur_element->next;
-    cur_index += 1;
+    info->mesh.elements[start_index + arr_index] = cubiod;
   }
+
   return info->mesh.num_elements - old_count;
 }
 
@@ -1915,77 +1897,89 @@ void order(float *x, float *y) {
   }
 }
 
-void load_model(cJSON* model_spec, BlockInfo* info) {
+void load_model(yyjson_val* model_spec, BlockInfo* info) {
   char fname[1000];
 
-  cJSON *model_name = cJSON_GetObjectItemCaseSensitive(model_spec, "model");
+  yyjson_val *model_name = yyjson_obj_get(model_spec, "model");
   if (model_name == NULL) {
     WARN("model property not found for %sb!", info->name);
     return;
   }
 
-  char *model_name_str = model_name->valuestring;
+  const char *model_name_str = yyjson_get_str(model_name);
   if (strncmp(model_name_str, "minecraft:", 10) == 0) {
     model_name_str += 10;
   }
   snprintf(fname, 1000, "data/assets/minecraft/models/%s.json", model_name_str);
-  cJSON *model = load_json(fname);
+  yyjson_doc *model = load_json(fname);
   if (model == NULL) {
     WARN("model not found %s", fname);
     return;
   }
   // Read the hierarchy
   int num_read_elements = 0;
-  cJSON *textures = cJSON_CreateObject();
-  cJSON *parent_model = model;
+  HashMap *textures = hashmap_create(30);
+  yyjson_doc *parent_model = model;
+  yyjson_val *parent_model_root = yyjson_doc_get_root(parent_model);
   while (parent_model) {
     // We need to read the textures in each time
-    cJSON * parent_textures = cJSON_GetObjectItemCaseSensitive(parent_model, "textures");
+    yyjson_val * parent_textures = yyjson_obj_get(parent_model_root, "textures");
+
     if (parent_textures != NULL) {
-      cJSON * ptexture = parent_textures->child;
-      while (ptexture != NULL) {
-        char* ptexture_value = ptexture->valuestring;
-        if (ptexture_value[0] == '#') {
+      size_t ind, max;
+      yyjson_val* ptexture;
+      yyjson_val* ptexture_name;
+      const char *str = yyjson_val_write(parent_model_root, 0, NULL);
+      // print str
+      DEBUG("Parent %s", str);
+      if (str) free(str);
+      yyjson_obj_foreach(parent_textures, ind, max, ptexture_name, ptexture) {
+        String ptexture_value = to_string(yyjson_get_str(ptexture));
+        if (ptexture_value.ptr[0] == '#') {
           // Look up real texture
-          cJSON *t = cJSON_GetObjectItemCaseSensitive(textures, ptexture_value+1);
-          ptexture_value = t->valuestring;
+          String t = hashmap_get(textures, substr(ptexture_value, 1, -1));
+          ptexture_value = t;
         }
-        cJSON_AddStringToObject(textures, ptexture->string, ptexture_value);
-        ptexture = ptexture->next;
+        DEBUG("yyjson=%s", yyjson_get_str(ptexture_name));
+        String ptexture_name_str = copy_buffer(to_string(yyjson_get_str(ptexture_name)));
+        DEBUG("Inserting ind=%d max=%d name=%sb value=%sb", ind, max, ptexture_name_str, ptexture_value);
+        hashmap_insert(textures, ptexture_name_str, ptexture_value);
       }
     }
 
     // Other than that, it's just parsing the elements
-    cJSON* elements = cJSON_GetObjectItemCaseSensitive(parent_model, "elements");
+    yyjson_val* elements = yyjson_obj_get(parent_model_root, "elements");
     if (elements != NULL && num_read_elements == 0) {
-      num_read_elements = add_elements_to_blockinfo(info, cJSON_GetObjectItemCaseSensitive(parent_model, "elements"), textures);
+      num_read_elements = add_elements_to_blockinfo(info, elements, textures);
     }
 
-    cJSON *parent_item = cJSON_GetObjectItemCaseSensitive(parent_model, "parent");
+    yyjson_val *parent_item = yyjson_obj_get(parent_model_root, "parent");
     if (parent_item != NULL) {
-      char* parent_name = parent_item->valuestring;
+      const char* parent_name = yyjson_get_str(parent_item);
       if (strncmp(parent_name, "minecraft:", 10) == 0) {
         parent_name += 10;
       }
       snprintf(fname, 1000, "data/assets/minecraft/models/%s.json", parent_name);
       if (parent_model != model) {
-        cJSON_Delete(parent_model);
+        yyjson_doc_free(parent_model);
       }
       parent_model = load_json(fname);
+      parent_model_root = yyjson_doc_get_root(parent_model);
     } else {
       parent_model = NULL;
     }
   }
-  cJSON_Delete(textures);
+  hashmap_destroy_all_values(textures);
+  hashmap_destroy(textures);
 
   // Uncomment to skip rotations
   // return;
 
   // Perform rotation
-  cJSON *y_rotation_j = cJSON_GetObjectItemCaseSensitive(model_spec, "y");
+  yyjson_val *y_rotation_j = yyjson_obj_get(model_spec, "y");
   int y_rotation = 0;
   if (y_rotation_j != NULL) {
-    y_rotation = y_rotation_j->valueint;
+    y_rotation = yyjson_get_num(y_rotation_j);
   }
 
   for (size_t i = info->mesh.num_elements - num_read_elements; i < info->mesh.num_elements; i++) {
@@ -2030,71 +2024,62 @@ void load_model(cJSON* model_spec, BlockInfo* info) {
   }
 }
 
-void load_multipart_state(cJSON *state, BlockInfo* info, cJSON *multipart) {
-  cJSON *properties = cJSON_GetObjectItemCaseSensitive(state, "properties");
+void load_multipart_state(yyjson_val *state, BlockInfo* info, yyjson_val *multipart) {
+  yyjson_val *properties = yyjson_obj_get(state, "properties");
 
   // Iterate through multiparts
   // Each one can add elements if its state properties matches the "when" clause
-  cJSON *part = multipart->child;
-  while (part != NULL) {
+  yyjson_val* part;
+  size_t index, max;
+  yyjson_arr_foreach(multipart, index, max, part) {
     bool all_properties_match = true;
-    cJSON *when = cJSON_GetObjectItemCaseSensitive(part, "when");
+    yyjson_val* when = yyjson_obj_get(part, "when");
     if (when != NULL) {
-      cJSON *condition = when->child;
-      while (condition != NULL) {
-        cJSON *prop = cJSON_GetObjectItemCaseSensitive(properties, condition->string);
-        if (cJSON_IsBool(prop) && !(cJSON_IsBool(condition) && condition->valueint == prop->valueint)) {
-          all_properties_match = false;
+      yyjson_val* condition_key, * condition_value;
+      size_t index, max;
+      yyjson_obj_foreach(when, index, max, condition_key, condition_value) {
+        yyjson_val* prop = yyjson_obj_get(properties, yyjson_get_str(condition_key));
+        all_properties_match = yyjson_equals(prop, condition_value);
+        if (!all_properties_match) {
           break;
         }
-        if (cJSON_IsNumber(prop) && !(cJSON_IsNumber(condition) && condition->valueint == prop->valueint)) {
-          all_properties_match = false;
-          break;
-        }
-        if (cJSON_IsString(prop) && !(cJSON_IsString(condition) && !strcmp(condition->valuestring, prop->valuestring))) {
-          all_properties_match = false;
-          break;
-        }
-        condition = condition->next;
       }
     }
 
     if (!all_properties_match) {
-      part = part->next;
       continue;
     }
 
-    cJSON *apply = cJSON_GetObjectItemCaseSensitive(part, "apply");
-    if (cJSON_IsArray(apply)) {
+    yyjson_val* apply = yyjson_obj_get(part, "apply");
+    if (yyjson_is_arr(apply)) {
       // Pick the first element if there are mulitple options for the variant
-      apply = apply->child;
+      apply = yyjson_arr_get(apply, 0);
     }
 
     load_model(apply, info);
-
-    part = part->next;
   }
 }
 
 
-void load_variant_state(cJSON *state, BlockInfo* info, cJSON *variants) {
+void load_variant_state(yyjson_val* state, BlockInfo* info, yyjson_val* variants) {
   char key_buffer[1000];
   char value_buffer[1000];
 
-  cJSON *state_id = cJSON_GetObjectItemCaseSensitive(state, "id");
-  cJSON *properties = cJSON_GetObjectItemCaseSensitive(state, "properties");
+  yyjson_val* state_id = yyjson_obj_get(state, "id");
+  yyjson_val* properties = yyjson_obj_get(state, "properties");
 
   // New plan
   // Iterate through variants
   // Parse the object key for property values "name=value,name=value,...,name=value"
   // For each name, make sure properties has the same property value
-  cJSON *variant = variants->child;
+  size_t index, max;
+  yyjson_val* variant_key, *variant_value;
   if (properties != NULL) {
-    while (variant != NULL) {
+    yyjson_obj_foreach(variants, index, max, variant_key, variant_value) {
       bool all_properties_match = true;
-      char *ch = variant->string;
+      const char *ch = yyjson_get_str(variant_key);
       while (*ch != '\0') {
-        char *end = ch;
+        const char *end = ch;
         while (*end != '=') {
           end += 1;
         }
@@ -2112,24 +2097,24 @@ void load_variant_state(cJSON *state, BlockInfo* info, cJSON *variants) {
         } else {
           ch = end;
         }
-        cJSON *property_value = cJSON_GetObjectItem(properties, key_buffer);
+        yyjson_val* property_value = yyjson_obj_get(properties, key_buffer);
         if (property_value == NULL) {
           all_properties_match = false;
           break;
         }
-        if (cJSON_IsTrue(property_value) && strcmp(value_buffer, "true")) {
+        if (yyjson_is_true(property_value) && strcmp(value_buffer, "true")) {
           all_properties_match = false;
           break;
         }
-        if (cJSON_IsFalse(property_value) && strcmp(value_buffer, "false")) {
+        if (yyjson_is_false(property_value) && strcmp(value_buffer, "false")) {
           all_properties_match = false;
           break;
         }
-        if (cJSON_IsString(property_value) && strcmp(value_buffer, property_value->valuestring)) {
+        if (yyjson_is_str(property_value) && strcmp(value_buffer, yyjson_get_str(property_value))) {
           all_properties_match = false;
           break;
         }
-        if (cJSON_IsNumber(property_value) && atoi(value_buffer) != property_value->valueint) {
+        if (yyjson_get_int(property_value) && atoi(value_buffer) != yyjson_get_int(property_value)) {
           all_properties_match = false;
           break;
         }
@@ -2137,101 +2122,101 @@ void load_variant_state(cJSON *state, BlockInfo* info, cJSON *variants) {
       if (all_properties_match) {
         break;
       }
-      variant = variant->next;
     }
   }
 
-  if (variant == NULL) {
-    WARN("Failed to find variant for state %d", state_id->valueint);
+  if (variant_value == NULL) {
+    WARN("Failed to find variant for state %d", yyjson_get_int(state_id));
     assert(false);
     return;
   }
 
-  if (cJSON_IsArray(variant)) {
+  if (yyjson_is_arr(variant_value)) {
     // Pick the first element if there are mulitple options for the variant
-    variant = variant->child;
+    variant_value = yyjson_arr_get(variant_value, 0);
   }
 
-  load_model(variant, info);
+  load_model(variant_value, info);
 }
 
-void load_block_states(cJSON* block) {
+void load_block_states(const char* block_name, yyjson_val* block) {
   char fname[1000];
 
   BlockInfo shared_info = {0};
-  char *block_name = block->string;
   if (strncmp(block_name, "minecraft:", 10) == 0) {
     block_name += 10;
   }
 
-  cJSON *definition = cJSON_GetObjectItemCaseSensitive(block, "definition");
-  cJSON *type = cJSON_GetObjectItemCaseSensitive(definition, "type");
-  shared_info.type = copy_buffer(to_string(type->valuestring));
+  yyjson_val* definition = yyjson_obj_get(block, "definition");
+  yyjson_val* type_json = yyjson_obj_get(definition, "type");
+  const char* type = yyjson_get_str(type_json);
+  shared_info.type = copy_buffer(to_string(type));
   shared_info.name = copy_buffer(to_string(block_name));
   if (
-    strcmp(type->valuestring, "minecraft:air") == 0 ||
-    strcmp(type->valuestring, "minecraft:flower") == 0 ||
-    strcmp(type->valuestring, "minecraft:vine") == 0 ||
-    strcmp(type->valuestring, "minecraft:dry_vegetation") == 0 ||
-    strcmp(type->valuestring, "minecraft:firefly_bush") == 0 ||
-    strcmp(type->valuestring, "minecraft:mushroom") == 0 ||
-    strcmp(type->valuestring, "minecraft:liquid") == 0 ||
-    strcmp(type->valuestring, "minecraft:seagrass") == 0 ||
-    strcmp(type->valuestring, "minecraft:tall_seagrass") == 0 ||
-    strcmp(type->valuestring, "minecraft:flower_bed") == 0 ||
-    strcmp(type->valuestring, "minecraft:bush") == 0
+    strcmp(type, "minecraft:air") == 0 ||
+    strcmp(type, "minecraft:flower") == 0 ||
+    strcmp(type, "minecraft:vine") == 0 ||
+    strcmp(type, "minecraft:dry_vegetation") == 0 ||
+    strcmp(type, "minecraft:firefly_bush") == 0 ||
+    strcmp(type, "minecraft:mushroom") == 0 ||
+    strcmp(type, "minecraft:liquid") == 0 ||
+    strcmp(type, "minecraft:seagrass") == 0 ||
+    strcmp(type, "minecraft:tall_seagrass") == 0 ||
+    strcmp(type, "minecraft:flower_bed") == 0 ||
+    strcmp(type, "minecraft:bush") == 0
   ) {
     shared_info.passable = true;
     shared_info.transparent = true;
   }
-  if (strcmp(type->valuestring, "minecraft:leaf_litter") == 0) {
+  if (strcmp(type, "minecraft:leaf_litter") == 0) {
     shared_info.passable = true;
     shared_info.transparent = true;
     shared_info.dry_foliage = true;
   }
-  if (strcmp(type->valuestring, "minecraft:grass") == 0) {
+  if (strcmp(type, "minecraft:grass") == 0) {
     shared_info.grass = true;
   }
   if (
-    strcmp(type->valuestring, "minecraft:tall_grass") == 0 ||
-    strcmp(type->valuestring, "minecraft:double_plant") == 0 ||
-    strcmp(type->valuestring, "minecraft:sugar_cane") == 0 ||
-    strcmp(type->valuestring, "minecraft:bush") == 0
+    strcmp(type, "minecraft:tall_grass") == 0 ||
+    strcmp(type, "minecraft:double_plant") == 0 ||
+    strcmp(type, "minecraft:sugar_cane") == 0 ||
+    strcmp(type, "minecraft:bush") == 0
   ) {
     shared_info.passable = true;
     shared_info.transparent = true;
     shared_info.grass = true;
   }
   if (
-    strcmp(type->valuestring, "minecraft:leaves") == 0 ||
-    strcmp(type->valuestring, "minecraft:tinted_particle_leaves") == 0 ||
-    strcmp(type->valuestring, "minecraft:waterlily") == 0 ||
-    strcmp(type->valuestring, "minecraft:vine") == 0
+    strcmp(type, "minecraft:leaves") == 0 ||
+    strcmp(type, "minecraft:tinted_particle_leaves") == 0 ||
+    strcmp(type, "minecraft:waterlily") == 0 ||
+    strcmp(type, "minecraft:vine") == 0
   ) {
     shared_info.transparent = true;
     shared_info.foliage = true;
   }
 
   snprintf(fname, 1000, "data/assets/minecraft/blockstates/%s.json", block_name);
-  cJSON *blockstate = load_json(fname);
-  if (blockstate == NULL) {
+  yyjson_doc* blockstate_doc = load_json(fname);
+  if (blockstate_doc == NULL) {
     WARN("blockstate not found for %s", block_name);
-    cJSON_Delete(blockstate);
     return;
   }
+  yyjson_val* blockstate = yyjson_doc_get_root(blockstate_doc);
 
 
-  cJSON *multipart = cJSON_GetObjectItemCaseSensitive(blockstate, "multipart");
-  cJSON *variants = cJSON_GetObjectItemCaseSensitive(blockstate, "variants");
+  yyjson_val* multipart = yyjson_obj_get(blockstate, "multipart");
+  yyjson_val* variants = yyjson_obj_get(blockstate, "variants");
 
-  cJSON *states = cJSON_GetObjectItemCaseSensitive(block, "states");
+  yyjson_val* states = yyjson_obj_get(block, "states");
   if (states != NULL) {
-    cJSON *state = states->child;
-    while (state != NULL) {
+    yyjson_val* state;
+    size_t index, max;
+    yyjson_arr_foreach(states, index, max, state) {
       int id = -1;
-      cJSON *state_id = cJSON_GetObjectItemCaseSensitive(state, "id");
-      if (state_id != NULL && cJSON_IsNumber(state_id)) {
-        id = state_id->valueint;
+      yyjson_val* state_id = yyjson_obj_get(state, "id");
+      if (state_id != NULL && yyjson_is_int(state_id)) {
+        id = yyjson_get_int(state_id);
       } else {
         WARN("No state id");
       }
@@ -2260,20 +2245,21 @@ void load_block_states(cJSON* block) {
       if (id != -1) {
         game.block_info[id] = info;
       }
-      state = state->next;
     }
   } else {
     WARN("No states for %sb", shared_info.name);
   }
-  cJSON_Delete(blockstate);
+  yyjson_doc_free(blockstate_doc);
 }
 
 void load_blocks() {
   game.blocks = load_json("data/blocks.json");
-  cJSON *block = game.blocks->child;
-  while (block != NULL) {
-    load_block_states(block);
-    block = block->next;
+  yyjson_val* blocks = yyjson_doc_get_root(game.blocks);
+  yyjson_val* block_name;
+  yyjson_val* block_value;
+  size_t index, max;
+  yyjson_obj_foreach(blocks, index, max, block_name, block_value) {
+    load_block_states(yyjson_get_str(block_name), block_value);
   }
 }
 
@@ -2773,6 +2759,6 @@ int main(int argc, char *argv[]) {
   wgpuInstanceRelease(game.instance);
   glfwTerminate();
   mcapi_destroy_connection(game.conn);
-  cJSON_Delete(game.blocks);
+  yyjson_doc_free(game.blocks);
   return 0;
 }
