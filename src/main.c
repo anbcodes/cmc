@@ -1752,24 +1752,22 @@ void read_json_arr_as_vec4(vec4 dst, yyjson_val * src) {
   }
 }
 
-uint16_t lookup_model_texture(const HashMap * textures, String texture_name) {
+uint16_t lookup_model_texture(yyjson_mut_val * textures, const char* texture_name) {
   static WritableBuffer texture_cache = { 0 };
   if (texture_cache.buf.buffer.ptr == NULL) {
     texture_cache = create_writable_buffer();
   }
 
-  if (texture_name.ptr[0] == '#') {
+  if (texture_name[0] == '#') {
     // if (!strcmp(texture_name, "#overlay")) {
     //   yyjson_val* overlay = yyjson_obj_get(textures, "overlay");
     //   if (overlay) {
     //     DEBUG("Looking up overlay: %s", overlay->valuestring);
     //   }
     // }
-    DEBUG("Looking up %sb", substr(texture_name, 1, -1));
-    texture_name = hashmap_get(textures, substr(texture_name, 1, -1));
-    assert(texture_name.ptr != NULL);
-    if (strncmp((char*)texture_name.ptr, "minecraft:", 10) == 0) {
-      texture_name = substr(texture_name, 10, -1);
+    texture_name = yyjson_mut_get_str(yyjson_mut_obj_get(textures, texture_name + 1));
+    if (strncmp(texture_name, "minecraft:", 10) == 0) {
+      texture_name = texture_name + 10;
     }
   }
 
@@ -1779,7 +1777,7 @@ uint16_t lookup_model_texture(const HashMap * textures, String texture_name) {
     uint16_t texture_index = (texture_cache.buf.buffer.ptr[i-2] << 8) + texture_cache.buf.buffer.ptr[i-1];
     String str = {.ptr = texture_cache.buf.buffer.ptr + i - 3 - len + 1, .len = len};
     // DEBUG("Loop i=%d len=%d ind=%d str=%sb\n", i, len, texture_index, str);
-    if (strings_equal(str, texture_name)) {
+    if (strings_equal(str, to_string(texture_name))) {
       found_index = texture_index;
       break;
     }
@@ -1787,28 +1785,26 @@ uint16_t lookup_model_texture(const HashMap * textures, String texture_name) {
   }
 
   if (found_index != -1) {
-    if (!strings_equal(texture_name, to_string("block/grass_block_side_overlay"))) {
+    if (!strcmp(texture_name, "block/grass_block_side_overlay")) {
       DEBUG("Overlay was already loaded");
     }
     return found_index;
   }
 
-  if (!strings_equal(texture_name, to_string("block/grass_block_side_overlay"))) {
+  if (!strcmp(texture_name, "block/grass_block_side_overlay")) {
     DEBUG("Should be loading overlay");
   }
-  char temp[100];
-  copy_into_cstr(texture_name, temp);
   char fname[1000];
-  snprintf(fname, 1000, "data/assets/minecraft/textures/%s.png", temp);
+  snprintf(fname, 1000, "data/assets/minecraft/textures/%s.png", texture_name);
   uint16_t index = add_file_texture_to_image(fname, game.texture_sheet, &game.next_texture_loc);
-  write_buffer(&texture_cache, texture_name);
+  write_buffer(&texture_cache, to_string(texture_name));
   write_short(&texture_cache, index);
-  write_byte(&texture_cache, texture_name.len);
+  write_byte(&texture_cache, strlen(texture_name));
 
   return index;
 }
 
-void read_face_from_json(yyjson_val* faces, char* face_name, MeshFace* into, HashMap *textures) {
+void read_face_from_json(yyjson_val* faces, char* face_name, MeshFace* into, yyjson_mut_val *textures) {
   yyjson_val *face = yyjson_obj_get(faces, face_name);
 
   if (face == NULL) {
@@ -1816,7 +1812,7 @@ void read_face_from_json(yyjson_val* faces, char* face_name, MeshFace* into, Has
   }
 
   read_json_arr_as_vec4(into->uv, yyjson_obj_get(face, "uv"));
-  into->texture = lookup_model_texture(textures, to_string(yyjson_get_str(yyjson_obj_get(face, "texture"))));
+  into->texture = lookup_model_texture(textures, yyjson_get_str(yyjson_obj_get(face, "texture")));
   yyjson_val* tint_index_j = yyjson_obj_get(face, "tintindex");
   into->tint_index = tint_index_j != NULL ? yyjson_get_num(tint_index_j) + 1 : 0;
   // TODO: Figure out how cullface actually works
@@ -1824,7 +1820,7 @@ void read_face_from_json(yyjson_val* faces, char* face_name, MeshFace* into, Has
 }
 
 // Adds the elements array to the mesh, each element is a MeshCubiod. Returns the number of elements added.
-int add_elements_to_blockinfo(BlockInfo* info, yyjson_val* elements, HashMap* textures) {
+int add_elements_to_blockinfo(BlockInfo* info, yyjson_val* elements, yyjson_mut_val* textures) {
   size_t old_count = info->mesh.num_elements;
   info->mesh.num_elements = old_count + yyjson_arr_size(elements);
   size_t start_index = 0;
@@ -1901,12 +1897,12 @@ void load_model(yyjson_val* model_spec, BlockInfo* info) {
   char fname[1000];
 
   yyjson_val *model_name = yyjson_obj_get(model_spec, "model");
-  if (model_name == NULL) {
+  const char *model_name_str = yyjson_get_str(model_name);
+  if (model_name_str == NULL) {
     WARN("model property not found for %sb!", info->name);
     return;
   }
 
-  const char *model_name_str = yyjson_get_str(model_name);
   if (strncmp(model_name_str, "minecraft:", 10) == 0) {
     model_name_str += 10;
   }
@@ -1918,7 +1914,9 @@ void load_model(yyjson_val* model_spec, BlockInfo* info) {
   }
   // Read the hierarchy
   int num_read_elements = 0;
-  HashMap *textures = hashmap_create(30);
+  yyjson_mut_doc *textures_doc = yyjson_mut_doc_new(NULL);
+  yyjson_mut_val *textures = yyjson_mut_obj(textures_doc);
+  yyjson_mut_doc_set_root(textures_doc, textures);
   yyjson_doc *parent_model = model;
   yyjson_val *parent_model_root = yyjson_doc_get_root(parent_model);
   while (parent_model) {
@@ -1929,21 +1927,17 @@ void load_model(yyjson_val* model_spec, BlockInfo* info) {
       size_t ind, max;
       yyjson_val* ptexture;
       yyjson_val* ptexture_name;
-      const char *str = yyjson_val_write(parent_model_root, 0, NULL);
-      // print str
-      DEBUG("Parent %s", str);
-      if (str) free(str);
       yyjson_obj_foreach(parent_textures, ind, max, ptexture_name, ptexture) {
-        String ptexture_value = to_string(yyjson_get_str(ptexture));
-        if (ptexture_value.ptr[0] == '#') {
+        const char* ptexture_value = yyjson_get_str(ptexture);
+        if (ptexture_value[0] == '#') {
           // Look up real texture
-          String t = hashmap_get(textures, substr(ptexture_value, 1, -1));
+          const char* t = yyjson_mut_get_str(yyjson_mut_obj_get(textures, ptexture_value + 1));
           ptexture_value = t;
         }
-        DEBUG("yyjson=%s", yyjson_get_str(ptexture_name));
-        String ptexture_name_str = copy_buffer(to_string(yyjson_get_str(ptexture_name)));
-        DEBUG("Inserting ind=%d max=%d name=%sb value=%sb", ind, max, ptexture_name_str, ptexture_value);
-        hashmap_insert(textures, ptexture_name_str, ptexture_value);
+        // DEBUG("yyjson=%s", yyjson_get_str(ptexture_name));
+        const char* ptexture_name_str = yyjson_get_str(ptexture_name);
+
+        yyjson_mut_obj_put(textures, yyjson_mut_strcpy(textures_doc, ptexture_name_str), yyjson_mut_strcpy(textures_doc, ptexture_value));
       }
     }
 
@@ -1969,8 +1963,7 @@ void load_model(yyjson_val* model_spec, BlockInfo* info) {
       parent_model = NULL;
     }
   }
-  hashmap_destroy_all_values(textures);
-  hashmap_destroy(textures);
+  yyjson_mut_doc_free(textures_doc);
 
   // Uncomment to skip rotations
   // return;
@@ -2074,7 +2067,8 @@ void load_variant_state(yyjson_val* state, BlockInfo* info, yyjson_val* variants
   // For each name, make sure properties has the same property value
   size_t index, max;
   yyjson_val* variant_key, *variant_value;
-  if (properties != NULL) {
+  variant_value = yyjson_obj_get(variants, "");
+  if (properties != NULL && variant_value == NULL) {
     yyjson_obj_foreach(variants, index, max, variant_key, variant_value) {
       bool all_properties_match = true;
       const char *ch = yyjson_get_str(variant_key);

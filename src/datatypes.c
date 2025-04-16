@@ -142,6 +142,25 @@ void destroy_writable_buffer(const WritableBuffer buffer) {
 
 // ========= Hash Table ===========
 
+typedef struct HashElement {
+  String key;
+  Buffer value;
+} HashElement;
+
+typedef struct HashMap {
+  HashElement* table;
+  size_t capacity;
+  size_t filled;
+} HashMap;
+
+HashMap* hashmap_create(int capacity);
+void hashmap_insert(HashMap* map, String key, Buffer value);
+void hashmap_resize(HashMap *map, int new_capacity);
+Buffer hashmap_get(const HashMap* map, String key);
+void hashmap_destroy_all_values(HashMap* map);
+void hashmap_destroy(HashMap* map);
+
+
 HashMap* hashmap_create(int capacity) {
   HashMap* map = malloc(sizeof(HashMap));
   map->table = calloc(capacity, sizeof(HashElement));

@@ -60,20 +60,20 @@ typedef struct BitSet {
 } BitSet;
 
 // HashMap
-typedef struct HashElement {
-  String key;
-  Buffer value;
-} HashElement;
+// typedef struct HashElement {
+//   String key;
+//   Buffer value;
+// } HashElement;
 
-typedef struct HashMap {
-  HashElement* table;
-  size_t capacity;
-  size_t filled;
-} HashMap;
+// typedef struct HashMap {
+//   HashElement* table;
+//   size_t capacity;
+//   size_t filled;
+// } HashMap;
 
-HashMap* hashmap_create(int capacity);
-void hashmap_insert(HashMap* map, String key, Buffer value);
-void hashmap_resize(HashMap *map, int new_capacity);
-Buffer hashmap_get(const HashMap* map, String key);
-void hashmap_destroy_all_values(HashMap* map);
-void hashmap_destroy(HashMap* map);
+// HashMap* hashmap_create(int capacity);
+// void hashmap_insert(HashMap* map, String key, Buffer value);
+// void hashmap_resize(HashMap *map, int new_capacity);
+// Buffer hashmap_get(const HashMap* map, String key);
+// void hashmap_destroy_all_values(HashMap* map);
+// void hashmap_destroy(HashMap* map);
