@@ -17,11 +17,11 @@ typedef enum NBTTagType {
   NBT_LONG_ARRAY,
 } NBTTagType;
 
-typedef struct NBT NBT;
+typedef struct NBTValue NBTValue;
 
-typedef struct NBT {
+typedef struct NBTValue {
   NBTTagType type;
-  String name;
+  char* name;
 
   union {
     uint8_t byte_value;
@@ -31,14 +31,14 @@ typedef struct NBT {
     float float_value;
     double double_value;
     Buffer byte_array_value;
-    String string_value;
+    char* string_value;
     struct nbt_list {
       int size;
-      NBT* items;
+      NBTValue* items;
     } list_value;
     struct nbt_compound {
       int count;
-      NBT* children;
+      NBTValue* children;
     } compound_value;
     struct nbt_int_array {
       int size;
@@ -49,8 +49,14 @@ typedef struct NBT {
       long* data;
     } long_array_value;
   };
+} NBTValue;
+
+typedef struct NBT {
+  MemPool pool;
+  NBTValue* root;
 } NBT;
+
 NBT* read_nbt(ReadableBuffer* p);
 
-NBT* nbt_get_compound_tag(NBT* nbt, char* name);
+NBTValue* nbt_get_compound_tag(NBTValue* nbt, char* name);
 void destroy_nbt(NBT* nbt);

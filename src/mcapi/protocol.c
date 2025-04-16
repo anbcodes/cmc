@@ -108,11 +108,11 @@ void write_varlong(WritableBuffer *io, long value) {
   }
 }
 
-void write_string(WritableBuffer *io, String string) {
-  write_varint(io, string.len);
+void write_string(WritableBuffer *io, char* string) {
+  write_varint(io, strlen(string));
   // TODO: Speed up by checking whole string length and adding it all at once
-  for (size_t i = 0; i < string.len; i++) {
-    write_byte(io, string.ptr[i]);
+  for (size_t i = 0; i < strlen(string); i++) {
+    write_byte(io, string[i]);
   }
 }
 
@@ -321,13 +321,15 @@ bool has_varlong(ReadableBuffer io) {
   return false;
 }
 
-String read_string(ReadableBuffer *io) {
+// @warning Allocates the string with malloc
+char* read_string(ReadableBuffer *io) {
   int len = read_varint(io);
 
-  String res = {
-    .len = len,
-    .ptr = io->buf.ptr + io->cursor,
-  };
+  char* res = malloc(len + 1);
+  if (!res) return NULL;
+
+  memcpy(res, io->buf.ptr + io->cursor, len);
+  res[len] = '\0';
 
   // printf("rs: len=%ld, cursor=%d, slen=%d\n", io->buf.len, io->cursor, len);
   io->cursor += len;

@@ -14,15 +14,8 @@ Buffer create_buffer(size_t len);
 void destroy_buffer(Buffer buffer);
 Buffer copy_buffer(Buffer buffer);
 void print_buffer(Buffer str);
-
-typedef Buffer String;
-
-String to_string(const char* c_str);
-String substr(String s, int start, int end);
-void copy_into_cstr(String string, char *c_str);
-void print_string(String str);
-void fprint_string(FILE* fp, String str);
-bool strings_equal(String s1, String s2);
+Buffer string_to_buffer(const char* c_str);
+char* copy_string(const char* str);
 
 void write_buffer_to_file(Buffer buf, const char* filename);
 
@@ -37,7 +30,7 @@ typedef struct ResizeableBuffer {
   size_t len;
 } ResizeableBuffer;
 
-ResizeableBuffer create_resizeable_buffer();
+ResizeableBuffer create_resizeable_buffer(size_t inital_capacity);
 void destroy_resizeable_buffer(const ResizeableBuffer buffer);
 void resizeable_buffer_ensure_capacity(ResizeableBuffer* buf, size_t capacity);
 Buffer resizable_buffer_to_buffer(ResizeableBuffer resizeable);
@@ -46,7 +39,7 @@ typedef struct WritableBuffer {
   ResizeableBuffer buf;
   size_t cursor;  // Location of next write
 } WritableBuffer;
-WritableBuffer create_writable_buffer();
+WritableBuffer create_writable_buffer(size_t inital_capacity);
 void destroy_writable_buffer(const WritableBuffer buffer);
 
 typedef struct UUID {
@@ -58,6 +51,15 @@ typedef struct BitSet {
   int length;
   uint64_t* data;
 } BitSet;
+
+// Mempool
+typedef struct MemPool {
+  WritableBuffer data;
+} MemPool;
+MemPool mempool_create(size_t inital_capacity);
+void* mempool_malloc(MemPool pool, size_t length);
+void* mempool_calloc(MemPool pool, size_t length, size_t element_size);
+void mempool_destroy(MemPool pool);
 
 // HashMap
 // typedef struct HashElement {

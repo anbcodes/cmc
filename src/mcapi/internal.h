@@ -85,8 +85,8 @@ struct mcapiConnection {
   mcapiConnState state;
   int compression_threshold;
 
-  String uuid;
-  String access_token;
+  char* uuid;
+  char* access_token;
 
   bool encryption_enabled;
   Buffer shared_secret;

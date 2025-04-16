@@ -24,7 +24,7 @@ WritableBuffer reusable_buffer = {
 PacketFunctions PACKET_FUNCTIONS = { 0 };
 
 void send_packet(mcapiConnection *conn, const Buffer packet) {
-  WritableBuffer header_buffer = create_writable_buffer();
+  WritableBuffer header_buffer = create_writable_buffer(30);
 
   Buffer const *rest_of_packet = NULL;
   Buffer compressed_buf = {};

@@ -40,7 +40,7 @@ MCAPI_HANDLER(config, PTYPE_CONFIGURATION_CB_SELECT_KNOWN_PACKS, clientbound_kno
 MCAPI_HANDLER(config, PTYPE_CONFIGURATION_CB_REGISTRY_DATA, registry_data, mcapiRegistryDataPacket, ({
   packet->id = read_string(p);
   packet->entry_count = read_varint(p);
-  packet->entry_names = malloc(sizeof(String) * packet->entry_count);
+  packet->entry_names = malloc(sizeof(char*) * packet->entry_count);
   packet->entries = malloc(sizeof(NBT *) * packet->entry_count);
   for (int i = 0; i < packet->entry_count; i++) {
     packet->entry_names[i] = read_string(p);
@@ -51,6 +51,7 @@ MCAPI_HANDLER(config, PTYPE_CONFIGURATION_CB_REGISTRY_DATA, registry_data, mcapi
   }
 }), ({
   for (int i = 0; i < packet->entry_count; i++) {
+    free(packet->entry_names[i]);
     destroy_nbt(packet->entries[i]);
   }
   free(packet->entry_names);

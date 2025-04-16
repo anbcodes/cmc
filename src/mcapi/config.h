@@ -1,12 +1,11 @@
 #pragma once
 
-#include "../datatypes.h"
 #include "base.h"
 
 typedef struct mcapiKnownPack {
-  String namespace;
-  String id;
-  String version;
+  char* namespace;
+  char* id;
+  char* version;
 } mcapiKnownPack;
 
 typedef struct mcapiServerboundKnownPacksPacket {
@@ -30,9 +29,9 @@ typedef struct mcapiClientboundKnownPacksPacket {
 void mcapi_set_clientbound_known_packs_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiClientboundKnownPacksPacket *));
 
 typedef struct mcapiRegistryDataPacket {
-  String id;
+  char* id;
   int entry_count;
-  String* entry_names;
+  char** entry_names;
   NBT** entries;
 } mcapiRegistryDataPacket;
 

@@ -2,34 +2,30 @@
 
 #include <stdio.h> // IWYU pragma: keep
 
-void aprintf(const char* fmt, ...);
-void afprintf(FILE* fp, const char* fmt, ...);
-void vafprintf(FILE* fp, const char* fmt, va_list ap);
-
 #define LOG_LEVEL 1
 
 #define TRACE_NN(...) { \
-  printf("TRACE [%s:%d] ", __FILE__, __LINE__); aprintf(__VA_ARGS__); \
+  printf("TRACE [%s:%d] ", __FILE__, __LINE__); printf(__VA_ARGS__); \
 }
 
 #define DEBUG_NN(...) { \
-  printf("DEBUG [%s:%d] ", __FILE__, __LINE__); aprintf(__VA_ARGS__); \
+  printf("DEBUG [%s:%d] ", __FILE__, __LINE__); printf(__VA_ARGS__); \
 }
 
 #define INFO_NN(...) { \
-  printf("INFO  [%s:%d] ", __FILE__, __LINE__); aprintf(__VA_ARGS__); \
+  printf("INFO  [%s:%d] ", __FILE__, __LINE__); printf(__VA_ARGS__); \
 }
 
 #define WARN_NN(...) { \
-  fprintf(stderr, "WARN  [%s:%d] ", __FILE__, __LINE__); afprintf(stderr, __VA_ARGS__); \
+  fprintf(stderr, "WARN  [%s:%d] ", __FILE__, __LINE__); fprintf(stderr, __VA_ARGS__); \
 }
 
 #define ERROR_NN(...) { \
-  fprintf(stderr, "ERROR [%s:%d] ", __FILE__, __LINE__); afprintf(stderr, __VA_ARGS__); \
+  fprintf(stderr, "ERROR [%s:%d] ", __FILE__, __LINE__); fprintf(stderr, __VA_ARGS__); \
 }
 
 #define FATAL_NN(...) { \
-  fprintf(stderr, "FATAL [%s:%d] ", __FILE__, __LINE__); afprintf(stderr, __VA_ARGS__); \
+  fprintf(stderr, "FATAL [%s:%d] ", __FILE__, __LINE__); fprintf(stderr, __VA_ARGS__); \
 }
 
 #define TRACE(...) { \

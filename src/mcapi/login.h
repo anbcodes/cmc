@@ -5,7 +5,7 @@
 
 typedef struct mcapiHandshakePacket {
   int protocol_version;  // See protocol version numbers https://wiki.vg/Protocol_version_numbers
-  String server_addr;    // Hostname or IP, e.g. localhost or 127.0.0.1, that was used to connect. The
+  char* server_addr;     // Hostname or IP, e.g. localhost or 127.0.0.1, that was used to connect. The
                          // Notchian server does not use this information. Note that SRV records are a
                          // simple redirect, e.g. if _minecraft._tcp.example.com points to
                          // mc.example.org, users connecting to example.com will provide example.org as
@@ -17,7 +17,7 @@ typedef struct mcapiHandshakePacket {
 void mcapi_send_handshake(mcapiConnection* conn, mcapiHandshakePacket packet);
 
 typedef struct mcapiLoginStartPacket {
-  String username;  // Player's Username.
+  char* username;  // Player's Username.
   UUID uuid;        // The UUID of the player logging in. Unused by the Notchian server.
 } mcapiLoginStartPacket;
 
@@ -44,7 +44,7 @@ typedef struct mcapiSetCompressionPacket {
 void mcapi_set_set_compression_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiSetCompressionPacket*));
 
 typedef struct mcapiEncryptionRequestPacket {
-  String serverId;
+  char* serverId;
   Buffer publicKey;
   Buffer verifyToken;
   bool shouldAuthenticate;
@@ -53,15 +53,15 @@ typedef struct mcapiEncryptionRequestPacket {
 void mcapi_set_encryption_request_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiEncryptionRequestPacket*));
 
 typedef struct mcapiLoginSuccessProperty {
-  String name;
-  String value;
+  char* name;
+  char* value;
   bool isSigned;
-  String signature;  // Only if Is Signed is true.
+  char* signature;  // Only if Is Signed is true.
 } mcapiLoginSuccessProperty;
 
 typedef struct mcapiLoginSuccessPacket {
   UUID uuid;
-  String username;
+  char* username;
   int number_of_properties;  // Number of elements in the following array.
   mcapiLoginSuccessProperty* properties;
   bool strict_error_handling;  // Whether the client should immediately disconnect upon a packet

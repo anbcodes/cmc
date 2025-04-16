@@ -3,7 +3,6 @@
 #include <stdbool.h>
 #include <assert.h>
 
-#include "cglm/call/mat4x3.h"
 #include "cglm/vec3.h"
 #include "framework.h"
 #include "logging.h"

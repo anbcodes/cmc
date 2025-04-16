@@ -571,15 +571,11 @@ void update_player_position(float dt) {
 
 void on_login_success(mcapiConnection *conn, mcapiLoginSuccessPacket *packet) {
   INFO("Finished login");
-  INFO("  Username: %sb", packet->username);
+  INFO("  Username: %s", packet->username);
   INFO("  UUID: %016lx%016lx", packet->uuid.upper, packet->uuid.lower);
   INFO("  %d Properties:", packet->number_of_properties);
   for (int i = 0; i < packet->number_of_properties; i++) {
-    INFO_NN("    ");
-    print_string(packet->properties[i].name);
-    printf(": ");
-    print_string(packet->properties[i].value);
-    printf("\n");
+    INFO("    %s: %s", packet->properties[i].name, packet->properties[i].value);
   }
 
   mcapi_send_login_acknowledged(conn);
@@ -603,7 +599,7 @@ void int_to_rgb(int color, vec3 result) {
 }
 
 void on_registry(mcapiConnection *UNUSED(conn), mcapiRegistryDataPacket *packet) {
-  if (strncmp((char*)packet->id.ptr, "minecraft:worldgen/biome", packet->id.len) == 0) {
+  if (strcmp(packet->id, "minecraft:worldgen/biome") == 0) {
     unsigned int width;
     unsigned int height;
     unsigned char *grass = load_image("data/assets/minecraft/textures/colormap/grass.png", &width, &height);
@@ -617,9 +613,9 @@ void on_registry(mcapiConnection *UNUSED(conn), mcapiRegistryDataPacket *packet)
     assert(height == 256);
     for (int i = 0; i < packet->entry_count; i++) {
       BiomeInfo info = {0};
-      info.temperature = nbt_get_compound_tag(packet->entries[i], "temperature")->float_value;
-      info.downfall = nbt_get_compound_tag(packet->entries[i], "downfall")->float_value;
-      NBT *effects = nbt_get_compound_tag(packet->entries[i], "effects");
+      info.temperature = nbt_get_compound_tag(packet->entries[i]->root, "temperature")->float_value;
+      info.downfall = nbt_get_compound_tag(packet->entries[i]->root, "downfall")->float_value;
+      NBTValue *effects = nbt_get_compound_tag(packet->entries[i]->root, "effects");
       int_to_rgb(nbt_get_compound_tag(effects, "fog_color")->int_value, info.fog_color);
       int_to_rgb(nbt_get_compound_tag(effects, "water_color")->int_value, info.water_color);
       int_to_rgb(nbt_get_compound_tag(effects, "water_fog_color")->int_value, info.water_fog_color);
@@ -631,7 +627,7 @@ void on_registry(mcapiConnection *UNUSED(conn), mcapiRegistryDataPacket *packet)
       int x_index = 255 - (int)(clamped_temperature * 255);
       int y_index = 255 - (int)(clamped_downfall * 255);
       int index = y_index * 256 + x_index;
-      NBT *grass_color = nbt_get_compound_tag(effects, "grass_color");
+      NBTValue *grass_color = nbt_get_compound_tag(effects, "grass_color");
       if (grass_color != NULL) {
         info.custom_grass_color = true;
         int_to_rgb(grass_color->int_value, info.grass_color);
@@ -641,10 +637,10 @@ void on_registry(mcapiConnection *UNUSED(conn), mcapiRegistryDataPacket *packet)
         info.grass_color[2] = grass[index * 4 + 2] / 255.0f;
       }
       // https://minecraft.fandom.com/wiki/Color#Grass
-      NBT *grass_color_modifier = nbt_get_compound_tag(effects, "grass_color_modifier");
+      NBTValue *grass_color_modifier = nbt_get_compound_tag(effects, "grass_color_modifier");
       if (grass_color_modifier != NULL) {
-        String modifier = grass_color_modifier->string_value;
-        if (!strncmp((char*)modifier.ptr, "swamp", modifier.len)) {
+        char* modifier = grass_color_modifier->string_value;
+        if (!strcmp(modifier, "swamp")) {
           info.swamp = true;
           // Swamp temperature, which starts at 0.8, is not affected by altitude.
           // Rather, a Perlin noise function is used to gradually vary the temperature of the swamp.
@@ -656,7 +652,7 @@ void on_registry(mcapiConnection *UNUSED(conn), mcapiRegistryDataPacket *packet)
         }
       }
 
-      NBT *foliage_color = nbt_get_compound_tag(effects, "foliage_color");
+      NBTValue *foliage_color = nbt_get_compound_tag(effects, "foliage_color");
       if (foliage_color != NULL) {
         info.custom_foliage_color = true;
         int_to_rgb(foliage_color->int_value, info.foliage_color);
@@ -833,7 +829,7 @@ void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char 
       .protocol_version = 770,
       // .protocol_version = 767,
       // .protocol_version = 769,
-      .server_addr = to_string(server_ip),
+      .server_addr = server_ip,
       .server_port = port,
       .next_state = 2,
     }
@@ -842,7 +838,7 @@ void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char 
   mcapi_send_login_start(
     conn,
     (mcapiLoginStartPacket){
-      .username = to_string(username),
+      .username = username,
       .uuid = (UUID){
         .upper = 0,
         .lower = 0,
@@ -1755,7 +1751,7 @@ void read_json_arr_as_vec4(vec4 dst, yyjson_val * src) {
 uint16_t lookup_model_texture(yyjson_mut_val * textures, const char* texture_name) {
   static WritableBuffer texture_cache = { 0 };
   if (texture_cache.buf.buffer.ptr == NULL) {
-    texture_cache = create_writable_buffer();
+    texture_cache = create_writable_buffer(1024*4);
   }
 
   if (texture_name[0] == '#') {
@@ -1775,13 +1771,13 @@ uint16_t lookup_model_texture(yyjson_mut_val * textures, const char* texture_nam
   for (int i = texture_cache.cursor-1; i > 0;) {
     uint8_t len = texture_cache.buf.buffer.ptr[i];
     uint16_t texture_index = (texture_cache.buf.buffer.ptr[i-2] << 8) + texture_cache.buf.buffer.ptr[i-1];
-    String str = {.ptr = texture_cache.buf.buffer.ptr + i - 3 - len + 1, .len = len};
-    // DEBUG("Loop i=%d len=%d ind=%d str=%sb\n", i, len, texture_index, str);
-    if (strings_equal(str, to_string(texture_name))) {
+    char* str = (char*)texture_cache.buf.buffer.ptr + i - 3 - len + 1;
+    // DEBUG("Loop i=%d len=%d ind=%d str=%s name=%s\n", i, len, texture_index, str, texture_name);
+    if (strncmp(str, texture_name, MIN(len, strlen(texture_name))) == 0) {
       found_index = texture_index;
       break;
     }
-    i -= 3 + str.len;
+    i -= 3 + len;
   }
 
   if (found_index != -1) {
@@ -1797,9 +1793,10 @@ uint16_t lookup_model_texture(yyjson_mut_val * textures, const char* texture_nam
   char fname[1000];
   snprintf(fname, 1000, "data/assets/minecraft/textures/%s.png", texture_name);
   uint16_t index = add_file_texture_to_image(fname, game.texture_sheet, &game.next_texture_loc);
-  write_buffer(&texture_cache, to_string(texture_name));
+  write_buffer(&texture_cache, string_to_buffer(texture_name));
+  write_byte(&texture_cache, 0);
   write_short(&texture_cache, index);
-  write_byte(&texture_cache, strlen(texture_name));
+  write_byte(&texture_cache, strlen(texture_name) + 1);
 
   return index;
 }
@@ -1838,7 +1835,7 @@ int add_elements_to_blockinfo(BlockInfo* info, yyjson_val* elements, yyjson_mut_
   } else {
     info->mesh.elements = calloc(info->mesh.num_elements, sizeof(MeshCuboid));
   }
-  // DEBUG("Elements for %sb: %d", info->name, info->mesh.num_elements);
+  // DEBUG("Elements for %s: %d", info->name, info->mesh.num_elements);
   if (info->mesh.num_elements == 0) {
     return 0;
   }
@@ -1899,7 +1896,7 @@ void load_model(yyjson_val* model_spec, BlockInfo* info) {
   yyjson_val *model_name = yyjson_obj_get(model_spec, "model");
   const char *model_name_str = yyjson_get_str(model_name);
   if (model_name_str == NULL) {
-    WARN("model property not found for %sb!", info->name);
+    WARN("model property not found for %s!", info->name);
     return;
   }
 
@@ -2144,8 +2141,10 @@ void load_block_states(const char* block_name, yyjson_val* block) {
   yyjson_val* definition = yyjson_obj_get(block, "definition");
   yyjson_val* type_json = yyjson_obj_get(definition, "type");
   const char* type = yyjson_get_str(type_json);
-  shared_info.type = copy_buffer(to_string(type));
-  shared_info.name = copy_buffer(to_string(block_name));
+  // TODO deal with this correctly, these pointers get copied into a bunch of spots
+  // A mempool for all the blockstates could work well, or just ignore it and assume we never free them
+  shared_info.type = copy_string(type);
+  shared_info.name = copy_string(block_name);
   if (
     strcmp(type, "minecraft:air") == 0 ||
     strcmp(type, "minecraft:flower") == 0 ||
@@ -2241,7 +2240,7 @@ void load_block_states(const char* block_name, yyjson_val* block) {
       }
     }
   } else {
-    WARN("No states for %sb", shared_info.name);
+    WARN("No states for %s", shared_info.name);
   }
   yyjson_doc_free(blockstate_doc);
 }
@@ -2553,7 +2552,7 @@ void tick() {
   update_player_position((float)(1.0 / TICKS_PER_SECOND));
   update_block_breaking_stages();
   if (tick_count % 10 == 0) {
-    DEBUG("target_material: %sb", game.block_info[game.target_material].name);
+    DEBUG("target_material: %s", game.block_info[game.target_material].name);
   }
 }
 

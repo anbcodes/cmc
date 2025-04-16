@@ -1,6 +1,5 @@
 #include <cglm/cglm.h>
 #include <wgpu.h>
-#include "datatypes.h"
 
 #define FLOATS_PER_VERTEX 14
 #define MAX_CHUNKS 1024
@@ -35,8 +34,8 @@ typedef struct Mesh {
 } Mesh;
 
 typedef struct BlockInfo {
-  String name;
-  String type;
+  char* name;
+  char* type;
   int state;
   bool transparent;
   bool passable;

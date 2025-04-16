@@ -21,21 +21,26 @@ size_t nbt_reader(void *_p, uint8_t *data, size_t size) {
   return to_read;
 }
 
-String read_nbt_string(ReadableBuffer *p) {
-  String res = {
-    .len = read_ushort(p),
-  };
+char* read_nbt_string(NBT* nbt, ReadableBuffer *p) {
+  short len = read_ushort(p);
+  if (len < 0 || len > p->buf.len - p->cursor) {
+    ERROR("Invalid string length: %d (cursor=%lu, buflen=%ld)", len, p->cursor, p->buf.len);
+    return NULL;
+  }
 
-  res.ptr = p->buf.ptr + p->cursor;
+  char* res = mempool_malloc(nbt->pool, len + 1);
 
-  p->cursor += res.len;
+  memcpy(res, p->buf.ptr + p->cursor, len);
+  res[len] = '\0';
+
+  p->cursor += len;
 
   return res;
 }
 
-void read_nbt_into(ReadableBuffer *p, NBT *nbt);
+void read_nbt_into(ReadableBuffer *p, NBT* root, NBTValue *nbt);
 
-void read_nbt_value(ReadableBuffer *p, NBT *nbt, NBTTagType type) {
+void read_nbt_value(ReadableBuffer *p, NBT* root, NBTValue *nbt, NBTTagType type) {
   nbt->type = type;
 
   int size;  // used in some branches
@@ -64,46 +69,52 @@ void read_nbt_value(ReadableBuffer *p, NBT *nbt, NBTTagType type) {
       nbt->byte_array_value = read_bytes(p, size);
       break;
     case NBT_STRING:
-      nbt->string_value = read_nbt_string(p);
+      nbt->string_value = read_nbt_string(root, p);
       break;
     case NBT_LIST:
       NBTTagType list_type = read_byte(p);
       size = nbt->list_value.size = read_int(p);
-      nbt->list_value.items = calloc(nbt->list_value.size, sizeof(NBT));
+      nbt->list_value.items = mempool_calloc(root->pool, nbt->list_value.size, sizeof(NBTValue));
       for (int i = 0; i < size; i++) {
         nbt->list_value.items[i].type = list_type;
-        read_nbt_value(p, nbt->list_value.items + i, list_type);
+        read_nbt_value(p, root, nbt->list_value.items + i, list_type);
       }
       break;
     case NBT_COMPOUND:
       int curr_buflen = 4;
-      nbt->compound_value.children = calloc(curr_buflen, sizeof(NBT));
+      nbt->compound_value.children = calloc(curr_buflen, sizeof(NBTValue));
+      DEBUG("Compound value children ptr=%p", nbt->compound_value.children);
       for (int i = 0;; i++) {
         if (i >= curr_buflen) {
           int old_buflen = curr_buflen;
           curr_buflen *= 2;
-          NBT *old = nbt->compound_value.children;
-          nbt->compound_value.children = calloc(curr_buflen, sizeof(NBT));
-          memcpy(nbt->compound_value.children, old, old_buflen * sizeof(NBT));
+          NBTValue *old = nbt->compound_value.children;
+          nbt->compound_value.children = calloc(curr_buflen, sizeof(NBTValue));
+          memcpy(nbt->compound_value.children, old, old_buflen * sizeof(NBTValue));
           free(old);
+          DEBUG("New compound value children ptr=%p", nbt->compound_value.children);
         }
-        read_nbt_into(p, nbt->compound_value.children + i);
+        read_nbt_into(p, root, nbt->compound_value.children + i);
         if (nbt->compound_value.children[i].type == NBT_END) {
           nbt->compound_value.count = i + 1;
           break;
         }
       }
+      NBTValue* old_children = nbt->compound_value.children;
+      nbt->compound_value.children = mempool_calloc(root->pool, nbt->compound_value.count, sizeof(NBTValue));
+      memcpy(nbt->compound_value.children, old_children, nbt->compound_value.count * sizeof(NBTValue));
+      free(old_children);
       break;
     case NBT_INT_ARRAY:
       size = nbt->int_array_value.size = read_int(p);
-      nbt->int_array_value.data = malloc(sizeof(int) * size);
+      nbt->int_array_value.data = mempool_malloc(root->pool, sizeof(int) * size);
       for (int i = 0; i < size; i++) {
         nbt->int_array_value.data[i] = read_int(p);
       }
       break;
     case NBT_LONG_ARRAY:
       size = nbt->long_array_value.size = read_int(p);
-      nbt->long_array_value.data = malloc(sizeof(int64_t) * size);
+      nbt->long_array_value.data = mempool_malloc(root->pool, sizeof(int64_t) * size);
       for (int i = 0; i < size; i++) {
         nbt->long_array_value.data[i] = read_long(p);
       }
@@ -114,7 +125,7 @@ void read_nbt_value(ReadableBuffer *p, NBT *nbt, NBTTagType type) {
   }
 }
 
-void read_nbt_into(ReadableBuffer *p, NBT *nbt) {
+void read_nbt_into(ReadableBuffer *p, NBT* root, NBTValue *nbt) {
   NBTTagType type = read_byte(p);
   nbt->type = type;
 
@@ -123,59 +134,41 @@ void read_nbt_into(ReadableBuffer *p, NBT *nbt) {
   }
 
   // All other tags are named
-  nbt->name = read_nbt_string(p);
-  read_nbt_value(p, nbt, type);
+  nbt->name = read_nbt_string(root, p);
+  read_nbt_value(p, root, nbt, type);
 }
 
 NBT *read_nbt(ReadableBuffer *p) {
-  NBT *nbt = calloc(1, sizeof(NBT));
+  NBT *root = calloc(1, sizeof(NBT));
+  root->pool = mempool_create(p->buf.len / 10);
+  NBTValue *nbt = mempool_calloc(root->pool, 1, sizeof(NBTValue));
+  root->root = nbt;
 
   int type = read_byte(p);
 
-  read_nbt_value(p, nbt, type);
+  read_nbt_value(p, root, nbt, type);
 
-  return nbt;
+  return root;
 }
 
-NBT *nbt_get_compound_tag(NBT *nbt, char *name) {
+NBTValue *nbt_get_compound_tag(NBTValue* nbt, char *name) {
   if (nbt->type != NBT_COMPOUND) {
     return NULL;
   }
   for (int i = 0; i < nbt->compound_value.count; i++) {
     // mcapi_print_str(nbt->compound_value.children[i].name);
     // printf("\n");
-    if (nbt->compound_value.children[i].name.len == 0) {
+    if (strlen(nbt->compound_value.children[i].name) == 0) {
       continue;
     }
-    if (strncmp((char*)nbt->compound_value.children[i].name.ptr, name, nbt->compound_value.children[i].name.len) == 0) {
+    if (strcmp(nbt->compound_value.children[i].name, name) == 0) {
       return nbt->compound_value.children + i;
     }
   }
   return NULL;
 }
-void _destroy_nbt_recur(NBT *nbt);
 
 void destroy_nbt(NBT *nbt) {
-  _destroy_nbt_recur(nbt);
+  mempool_destroy(nbt->pool);
   free(nbt);
-}
-
-void _destroy_nbt_recur(NBT *nbt) {
-  if (nbt->type == NBT_COMPOUND) {
-    for (int i = 0; i < nbt->compound_value.count; i++) {
-      _destroy_nbt_recur(&nbt->compound_value.children[i]);
-    }
-    free(nbt->compound_value.children);
-  } else if (nbt->type == NBT_LIST) {
-    for (int i = 0; i < nbt->list_value.size; i++) {
-      _destroy_nbt_recur(&nbt->list_value.items[i]);
-    }
-    free(nbt->list_value.items);
-  } else if (nbt->type == NBT_BYTE_ARRAY) {
-    destroy_buffer(nbt->byte_array_value);
-  } else if (nbt->type == NBT_INT_ARRAY) {
-    free(nbt->int_array_value.data);
-  } else if (nbt->type == NBT_LONG_ARRAY) {
-    free(nbt->long_array_value.data);
-  }
 }

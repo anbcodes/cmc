@@ -17,7 +17,7 @@ void write_float(WritableBuffer *io, float value);
 void write_double(WritableBuffer *io, double value);
 void write_varint(WritableBuffer *io, int value);
 void write_varlong(WritableBuffer *io, long value);
-void write_string(WritableBuffer *io, String string);
+void write_string(WritableBuffer *io, char* string);
 void write_uuid(WritableBuffer *io, UUID uuid);
 void write_ipos(WritableBuffer *io, ivec3 pos);
 
@@ -38,7 +38,7 @@ bool bitset_at(BitSet bitset, int index);
 bool has_varint(ReadableBuffer io);
 long read_varlong(ReadableBuffer *io);
 bool has_varlong(ReadableBuffer io);
-String read_string(ReadableBuffer *io);
+char* read_string(ReadableBuffer *io);
 UUID read_uuid(ReadableBuffer *io);
 void read_ipos_into(ReadableBuffer *io, ivec3 pos);
 void read_compressed_long_arr(ReadableBuffer *p, int bits_per_entry, int entries, int compressed_len, int to[]);

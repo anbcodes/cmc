@@ -80,8 +80,8 @@ mcapiConnection *mcapi_create_connection(char *hostname, short port, char *uuid,
   // OPENSSL_config(NULL);
 
   mcapiConnection *conn = calloc(1, sizeof(mcapiConnection));
-  conn->access_token = to_string(access_token);
-  conn->uuid = to_string(uuid);
+  conn->access_token = access_token;
+  conn->uuid = uuid;
 
   conn->sockfd = sockfd;
 
@@ -136,7 +136,7 @@ void enable_encryption(mcapiConnection *conn, mcapiEncryptionRequestPacket *encr
     EVP_MD_CTX *mdCtx = EVP_MD_CTX_new();
     Buffer hash = create_buffer(20);
     if (1 != EVP_DigestInit_ex(mdCtx, EVP_sha1(), NULL)) ERR_print_errors_fp(stderr);
-    if (1 != EVP_DigestUpdate(mdCtx, encrypt_req->serverId.ptr, encrypt_req->serverId.len)) ERR_print_errors_fp(stderr);
+    if (1 != EVP_DigestUpdate(mdCtx, encrypt_req->serverId, strlen(encrypt_req->serverId))) ERR_print_errors_fp(stderr);
     if (1 != EVP_DigestUpdate(mdCtx, shared_secret.ptr, shared_secret.len)) ERR_print_errors_fp(stderr);
     if (1 != EVP_DigestUpdate(mdCtx, encrypt_req->publicKey.ptr, encrypt_req->publicKey.len)) ERR_print_errors_fp(stderr);
     if (1 != EVP_DigestFinal_ex(mdCtx, hash.ptr, NULL)) ERR_print_errors_fp(stderr);
@@ -146,7 +146,7 @@ void enable_encryption(mcapiConnection *conn, mcapiEncryptionRequestPacket *encr
 
     char *hex_chars = "0123456789abcdef";
 
-    WritableBuffer hash_as_string = create_writable_buffer();
+    WritableBuffer hash_as_string = create_writable_buffer(41);
 
     bool is_neg = hash.ptr[0] & 0b10000000;
     if (is_neg) {
@@ -167,14 +167,14 @@ void enable_encryption(mcapiConnection *conn, mcapiEncryptionRequestPacket *encr
 
     // Authenticate with servers
 
-    WritableBuffer json = create_writable_buffer();
-    write_buffer(&json, to_string("{\"accessToken\":\""));
-    write_buffer(&json, conn->access_token);
-    write_buffer(&json, to_string("\", \"selectedProfile\":\""));
-    write_buffer(&json, conn->uuid);
-    write_buffer(&json, to_string("\", \"serverId\":\""));
+    WritableBuffer json = create_writable_buffer(50);
+    write_buffer(&json, string_to_buffer("{\"accessToken\":\""));
+    write_buffer(&json, string_to_buffer(conn->access_token));
+    write_buffer(&json, string_to_buffer("\", \"selectedProfile\":\""));
+    write_buffer(&json, string_to_buffer(conn->uuid));
+    write_buffer(&json, string_to_buffer("\", \"serverId\":\""));
     write_buffer(&json, resizable_buffer_to_buffer(hash_as_string.buf));
-    write_buffer(&json, to_string("\"}"));
+    write_buffer(&json, string_to_buffer("\"}"));
     write_byte(&json, '\0');  // Allows it to be used like a c str
 
     destroy_writable_buffer(hash_as_string);
