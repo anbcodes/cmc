@@ -52,7 +52,7 @@ typedef struct NBTValue {
 } NBTValue;
 
 typedef struct NBT {
-  MemPool pool;
+  MemPool* pool;
   NBTValue* root;
 } NBT;
 

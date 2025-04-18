@@ -83,7 +83,6 @@ void read_nbt_value(ReadableBuffer *p, NBT* root, NBTValue *nbt, NBTTagType type
     case NBT_COMPOUND:
       int curr_buflen = 4;
       nbt->compound_value.children = calloc(curr_buflen, sizeof(NBTValue));
-      DEBUG("Compound value children ptr=%p", nbt->compound_value.children);
       for (int i = 0;; i++) {
         if (i >= curr_buflen) {
           int old_buflen = curr_buflen;
@@ -140,7 +139,7 @@ void read_nbt_into(ReadableBuffer *p, NBT* root, NBTValue *nbt) {
 
 NBT *read_nbt(ReadableBuffer *p) {
   NBT *root = calloc(1, sizeof(NBT));
-  root->pool = mempool_create(p->buf.len / 10);
+  root->pool = mempool_create(1024);
   NBTValue *nbt = mempool_calloc(root->pool, 1, sizeof(NBTValue));
   root->root = nbt;
 
@@ -158,7 +157,7 @@ NBTValue *nbt_get_compound_tag(NBTValue* nbt, char *name) {
   for (int i = 0; i < nbt->compound_value.count; i++) {
     // mcapi_print_str(nbt->compound_value.children[i].name);
     // printf("\n");
-    if (strlen(nbt->compound_value.children[i].name) == 0) {
+    if (nbt->compound_value.children[i].name == NULL || strlen(nbt->compound_value.children[i].name) == 0) {
       continue;
     }
     if (strcmp(nbt->compound_value.children[i].name, name) == 0) {

@@ -53,13 +53,23 @@ typedef struct BitSet {
 } BitSet;
 
 // Mempool
+typedef struct MemPoolChunk MemPoolChunk;
+
 typedef struct MemPool {
-  WritableBuffer data;
+  size_t chunk_size;
+  size_t cursor;
+  MemPoolChunk* first;
 } MemPool;
-MemPool mempool_create(size_t inital_capacity);
-void* mempool_malloc(MemPool pool, size_t length);
-void* mempool_calloc(MemPool pool, size_t length, size_t element_size);
-void mempool_destroy(MemPool pool);
+
+typedef struct MemPoolChunk {
+  MemPoolChunk* next;
+  uint8_t data[];
+} MemPoolChunk;
+
+MemPool *mempool_create(size_t chunk_size);
+void* mempool_malloc(MemPool *pool, size_t length);
+void* mempool_calloc(MemPool *pool, size_t length, size_t element_size);
+void mempool_destroy(MemPool *pool);
 
 // HashMap
 // typedef struct HashElement {

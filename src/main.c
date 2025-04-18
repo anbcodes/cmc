@@ -1773,7 +1773,7 @@ uint16_t lookup_model_texture(yyjson_mut_val * textures, const char* texture_nam
     uint16_t texture_index = (texture_cache.buf.buffer.ptr[i-2] << 8) + texture_cache.buf.buffer.ptr[i-1];
     char* str = (char*)texture_cache.buf.buffer.ptr + i - 3 - len + 1;
     // DEBUG("Loop i=%d len=%d ind=%d str=%s name=%s\n", i, len, texture_index, str, texture_name);
-    if (strncmp(str, texture_name, MIN(len, strlen(texture_name))) == 0) {
+    if (len - 1 == strlen(texture_name) && strncmp(str, texture_name, MIN(len, strlen(texture_name))) == 0) {
       found_index = texture_index;
       break;
     }

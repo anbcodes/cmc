@@ -1,5 +1,6 @@
 #include "datatypes.h"
 
+#include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -117,30 +118,55 @@ void destroy_writable_buffer(const WritableBuffer buffer) {
 }
 
 // === mem pool ===
+MemPoolChunk* mempool_create_chunk(size_t chunk_size) {
+  MemPoolChunk* chunk = malloc(sizeof(MemPoolChunk) + chunk_size);
+  chunk->next = NULL;
+  return chunk;
+}
 
 // Creates a mempool, pass 0 to inital_capacity to use the default
-MemPool mempool_create(size_t inital_capacity) {
-  MemPool pool = {.data = create_writable_buffer(inital_capacity)};
+MemPool* mempool_create(size_t chunk_size) {
+  MemPool* pool = malloc(sizeof(MemPool));
+  *pool = (MemPool){
+    .chunk_size = chunk_size,
+    .first = mempool_create_chunk(chunk_size),
+  };
   return pool;
 }
 
-void* mempool_malloc(MemPool pool, size_t length) {
-  resizeable_buffer_ensure_capacity(&pool.data.buf, pool.data.cursor + length);
-  void* ptr = &pool.data.buf.buffer.ptr[pool.data.cursor];
+void *mempool_malloc(MemPool* pool, size_t length) {
+  if (length > pool->chunk_size) {
+    assert(false && "length must be less than chunk size");
+  }
+
+  // Make sure we have enough space
+  if (pool->cursor + length > pool->chunk_size) {
+    MemPoolChunk* old = pool->first;
+    pool->first = mempool_create_chunk(pool->chunk_size);
+    pool->cursor = 0;
+    old->next = pool->first;
+  }
+
+  void* ptr = &pool->first->data[pool->cursor];
   DEBUG("malloc %p", ptr);
-  pool.data.cursor += length;
+  pool->cursor += length;
 
   return ptr;
 }
 
-void* mempool_calloc(MemPool pool, size_t length, size_t element_size) {
-  int tot_len = length*element_size;
+void* mempool_calloc(MemPool* pool, size_t length, size_t element_size) {
+  size_t tot_len = length*element_size;
   void* ptr = mempool_malloc(pool, tot_len);
   memset(ptr, 0, tot_len);
   DEBUG("calloc %p", ptr);
   return ptr;
 }
 
-void mempool_destroy(MemPool pool) {
-  destroy_writable_buffer(pool.data);
+void mempool_destroy(MemPool* pool) {
+  while (pool->first != NULL) {
+    MemPoolChunk* next = pool->first->next;
+    free(pool->first);
+    pool->first = next;
+  }
+  free(pool);
 }
