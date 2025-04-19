@@ -31,12 +31,19 @@ Chunk *world_chunk(World *world, int x, int z) {
   return NULL;
 }
 
-void chunk_destroy(Chunk *chunk) {
+void chunk_destroy_buffers(Chunk *chunk) {
   for (int j = 0; j < 24; j++) {
     if (chunk->sections[j].num_quads != 0) {
-      wgpuBufferRelease(chunk->sections[j].vertex_buffer);
+      if (chunk->sections[j].vertex_buffer != NULL) {
+        wgpuBufferRelease(chunk->sections[j].vertex_buffer);
+        chunk->sections[j].vertex_buffer = NULL;
+      }
     }
   }
+}
+
+void chunk_destroy(Chunk *chunk) {
+  chunk_destroy_buffers(chunk);
   free(chunk);
 }
 

@@ -91,7 +91,6 @@ void read_nbt_value(ReadableBuffer *p, NBT* root, NBTValue *nbt, NBTTagType type
           nbt->compound_value.children = calloc(curr_buflen, sizeof(NBTValue));
           memcpy(nbt->compound_value.children, old, old_buflen * sizeof(NBTValue));
           free(old);
-          DEBUG("New compound value children ptr=%p", nbt->compound_value.children);
         }
         read_nbt_into(p, root, nbt->compound_value.children + i);
         if (nbt->compound_value.children[i].type == NBT_END) {

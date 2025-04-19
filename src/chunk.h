@@ -106,6 +106,7 @@ typedef struct Chunk {
   ChunkSection sections[Y_SECTIONS];
 } Chunk;
 
+void chunk_destroy_buffers(Chunk *chunk);
 void chunk_destroy(Chunk *chunk);
 
 typedef struct World {

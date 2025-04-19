@@ -148,7 +148,6 @@ void *mempool_malloc(MemPool* pool, size_t length) {
   }
 
   void* ptr = &pool->first->data[pool->cursor];
-  DEBUG("malloc %p", ptr);
   pool->cursor += length;
 
   return ptr;
@@ -158,7 +157,6 @@ void* mempool_calloc(MemPool* pool, size_t length, size_t element_size) {
   size_t tot_len = length*element_size;
   void* ptr = mempool_malloc(pool, tot_len);
   memset(ptr, 0, tot_len);
-  DEBUG("calloc %p", ptr);
   return ptr;
 }
 

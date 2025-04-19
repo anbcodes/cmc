@@ -691,6 +691,9 @@ void on_chunk(mcapiConnection *UNUSED(conn), mcapiChunkAndLightDataPacket* packe
   if (chunk == NULL) {
     chunk = calloc(1, sizeof(Chunk));
     is_new = true;
+  } else {
+    // Reset chunk mesh
+    chunk_destroy_buffers(chunk);
   }
 
   chunk->x = packet->chunk_x;
@@ -2552,7 +2555,7 @@ void tick() {
   update_player_position((float)(1.0 / TICKS_PER_SECOND));
   update_block_breaking_stages();
   if (tick_count % 10 == 0) {
-    DEBUG("target_material: %s", game.block_info[game.target_material].name);
+    DEBUG("target_material: %s x: %.2f y: %.2f z: %.2f chunk: %d %d", game.block_info[game.target_material].name, game.position[0], game.position[1], game.position[2], (int)(floor(game.position[0] / CHUNK_SIZE)), (int)(floor(game.position[2] / CHUNK_SIZE)));
   }
 }
 
