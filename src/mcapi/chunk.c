@@ -242,3 +242,10 @@ MCAPI_HANDLER(play, PTYPE_PLAY_CB_BLOCK_UPDATE, block_update, mcapiBlockUpdatePa
 }), ({
   // No free needed
 }))
+
+MCAPI_HANDLER(play, PTYPE_PLAY_CB_FORGET_LEVEL_CHUNK, unload_chunk, mcapiUnloadChunk, ({
+  packet->cx = read_int(p);
+  packet->cz = read_int(p);
+}), ({
+  // No free needed
+}))

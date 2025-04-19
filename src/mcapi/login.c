@@ -68,7 +68,7 @@ MCAPI_HANDLER(login, PTYPE_LOGIN_CB_HELLO, encryption_request, mcapiEncryptionRe
   packet->verifyToken = read_bytes(p, verifylen);
   packet->shouldAuthenticate = read_byte(p);
 }), ({
-  // Nothing special to free
+  free(packet->serverId);
 }))
 
 MCAPI_HANDLER(login, PTYPE_LOGIN_CB_LOGIN_FINISHED, login_success, mcapiLoginSuccessPacket, ({
@@ -91,5 +91,15 @@ MCAPI_HANDLER(login, PTYPE_LOGIN_CB_LOGIN_FINISHED, login_success, mcapiLoginSuc
 
   packet->strict_error_handling = read_byte(p);
 }), ({
+  free(packet->username);
+  for (int i = 0; i < packet->number_of_properties; i++) {
+    free(packet->properties[i].name);
+    free(packet->properties[i].value);
+
+    if (packet->properties[i].isSigned) {
+      free(packet->properties[i].signature);
+    }
+  }
+
   free(packet->properties);
 }))

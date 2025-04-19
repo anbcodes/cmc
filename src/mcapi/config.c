@@ -34,6 +34,11 @@ MCAPI_HANDLER(config, PTYPE_CONFIGURATION_CB_SELECT_KNOWN_PACKS, clientbound_kno
     packet->known_packs[i].version = read_string(p);
   }
 }), ({
+  for (int i = 0; i < packet->known_pack_count; i++) {
+    free(packet->known_packs[i].namespace);
+    free(packet->known_packs[i].id);
+    free(packet->known_packs[i].version);
+  }
   free(packet->known_packs);
 }))
 

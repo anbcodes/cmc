@@ -23,7 +23,7 @@ size_t nbt_reader(void *_p, uint8_t *data, size_t size) {
 
 char* read_nbt_string(NBT* nbt, ReadableBuffer *p) {
   short len = read_ushort(p);
-  if (len < 0 || len > p->buf.len - p->cursor) {
+  if (len < 0 || (size_t)len > p->buf.len - p->cursor) {
     ERROR("Invalid string length: %d (cursor=%lu, buflen=%ld)", len, p->cursor, p->buf.len);
     return NULL;
   }

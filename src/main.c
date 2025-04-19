@@ -8,7 +8,6 @@
 #include <wgpu.h>
 #include <yyjson.h>
 
-#include "cglm/affine-post.h"
 #include "cglm/mat4.h"
 #include "logging.h"
 // #include "cJSON.h"
@@ -17,6 +16,8 @@
 #include "framework.h"
 #include "lodepng/lodepng.h"
 #include "macros.h"
+#include "mcapi/chunk.h"
+#include "mcapi/entity.h"
 #include "mcapi/mcapi.h"
 #include "mcapi/protocol.h"
 #include "nbt.h"
@@ -714,6 +715,10 @@ void on_chunk(mcapiConnection *UNUSED(conn), mcapiChunkAndLightDataPacket* packe
   world_init_new_meshes(&game.world, game.block_info, game.biome_info, game.device);
 }
 
+void on_unload_chunk(mcapiConnection *, mcapiUnloadChunk *p) {
+  DEBUG("unload chunk cx: %d cz: %d", p->cx, p->cz);
+}
+
 void on_light(mcapiConnection *UNUSED(conn), mcapiUpdateLightPacket *packet) {
   DEBUG("Light updated!!! %d, %d", packet->chunk_x, packet->chunk_z);
   Chunk *chunk = world_chunk(&game.world, packet->chunk_x, packet->chunk_z);
@@ -822,6 +827,58 @@ uint16_t add_file_texture_to_image(const char *fname, unsigned char *texture_she
   return add_file_texture_to_image_sub_opacity(fname, texture_sheet, cur_texture, 0);
 }
 
+void on_add_entity(mcapiConnection*, mcapiAddEntityPacket *p) {
+  DEBUG("add_entity id: %d type %d x %.2f y %.2f z %.2f pitch %d yaw %d yaw_head %d data %d vx %d vy %d vz %d",
+    p->id, p->type, p->x, p->y, p->z, p->pitch, p->yaw, p->yaw_head, p->data, p->vx, p->vy, p->vz);
+}
+
+void on_update_entity_pos(mcapiConnection*, mcapiUpdateEntityPositionPacket *p) {
+  // int id;
+  // short dx;
+  // short dy;
+  // short dz;
+  // bool on_ground;
+
+  DEBUG("update_entity_pos id: %d dx: %d dy: %d dz: %d on_ground: %d",
+    p->id, p->dx, p->dy, p->dz, p->on_ground);
+}
+
+void on_update_entity_pos_rot(mcapiConnection*, mcapiUpdateEntityPositionRotationPacket *p) {
+  // int id;
+  // short dx;
+  // short dy;
+  // short dz;
+  // uint8_t pitch;
+  // uint8_t yaw;
+  // bool on_ground;
+
+  DEBUG("update_entity_pos_rot id: %d dx: %d dy: %d dz: %d pitch: %d, yaw: %d on_ground: %d",
+    p->id, p->dx, p->dy, p->dz, p->pitch, p->yaw, p->on_ground);
+}
+
+void on_teleport_entity(mcapiConnection*, mcapiTeleportEntityPacket *p) {
+  // int id;
+  // double x;
+  // double y;
+  // double z;
+  // double vx;
+  // double vy;
+  // double vz;
+  // float yaw;
+  // float pitch;
+  // bool on_ground;
+
+  DEBUG("teleport_entity id: %d x: %.2f y: %.2f z: %.2f vx: %.2f vy: %.2f vz: %.2f yaw: %.2f pitch: %.2f on_ground: %d",
+    p->id, p->x, p->y, p->z, p->vx, p->vy, p->vz, p->yaw, p->pitch, p->on_ground);
+}
+
+void on_remove_entities(mcapiConnection *, mcapiRemoveEntitiesPacket *p) {
+  DEBUG("remove_entities count: %d", p->entity_count);
+  for (int i = 0; i < p->entity_count; i++) {
+    DEBUG("removed entities[%d]: %d", i, p->entity_ids[i]);
+  }
+}
+
 void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char *username) {
   mcapiConnection *conn = mcapi_create_connection(server_ip, port, uuid, access_token);
   game.conn = conn;
@@ -855,6 +912,7 @@ void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char 
   mcapi_set_clientbound_known_packs_cb(conn, on_known_packs);
   mcapi_set_finish_config_cb(conn, on_finish_config);
   mcapi_set_chunk_and_light_data_cb(conn, on_chunk);
+  mcapi_set_unload_chunk_cb(conn, on_unload_chunk);
   mcapi_set_update_light_cb(conn, on_light);
   mcapi_set_block_update_cb(conn, on_block_update);
   mcapi_set_synchronize_player_position_cb(conn, on_position);
@@ -863,6 +921,11 @@ void init_mcapi(char *server_ip, int port, char *uuid, char *access_token, char 
   mcapi_set_set_block_destroy_stage_cb(conn, on_set_block_destroy_stage);
   mcapi_set_chunk_batch_finished_cb(conn, on_chunk_batch_finished);
   mcapi_set_clientbound_keepalive_cb(conn, on_clientbound_keepalive);
+  mcapi_set_add_entity_cb(conn, on_add_entity);
+  mcapi_set_update_entity_position_cb(conn, on_update_entity_pos);
+  mcapi_set_update_entity_position_rotation_cb(conn, on_update_entity_pos_rot);
+  mcapi_set_teleport_entity_cb(conn, on_teleport_entity);
+  mcapi_set_remove_entities_cb(conn, on_remove_entities);
 }
 
 void chunk_renderer_init() {

@@ -67,3 +67,10 @@ typedef struct mcapiChunkBatchFinishedPacket {
 } mcapiChunkBatchFinishedPacket;
 
 void mcapi_set_chunk_batch_finished_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiChunkBatchFinishedPacket*));
+
+typedef struct mcapiUnloadChunk {
+  int cx;
+  int cz;
+} mcapiUnloadChunk;
+
+void mcapi_set_unload_chunk_cb(mcapiConnection* conn, void (*cb)(mcapiConnection*, mcapiUnloadChunk*));
