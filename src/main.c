@@ -10,8 +10,7 @@
 
 #include "cglm/mat4.h"
 #include "logging.h"
-// #include "cJSON.h"
-#include "chunk.h"
+#include "world.h"
 #include "datatypes.h"
 #include "framework.h"
 #include "lodepng/lodepng.h"
@@ -89,6 +88,28 @@ typedef struct BlockSelectedRenderer {
   WGPUBuffer vertex_buffer;
 } BlockSelectedRenderer;
 
+typedef struct EntityUniforms {
+  mat4 view;
+  mat4 projection;
+  vec3 position;
+} EntityUniforms;
+
+typedef struct {
+    float position[3];
+} EntityInstance;
+
+typedef struct EntityRenderer {
+  WGPUShaderModule shader_module;
+  WGPUBindGroup bind_group;
+  WGPURenderPipeline render_pipeline;
+  WGPUPipelineLayout pipeline_layout;
+  EntityUniforms uniforms;
+  WGPUBuffer uniform_buffer;
+  WGPUBuffer vertex_buffer;
+  WGPUBuffer instance_buffer;
+  EntityInstance instance_data[MAX_ENTITIES];
+} EntityRenderer;
+
 typedef struct BlockBeingBroken {
   ivec3 position;
   int stage;
@@ -114,6 +135,7 @@ typedef struct Game {
   WGPUShaderModule shader_module;
   SkyRenderer sky_renderer;
   BlockSelectedRenderer block_selected_renderer;
+  EntityRenderer entity_renderer;
   GLFWwindow *window;
   float eye_height;
   vec3 size;
@@ -717,6 +739,7 @@ void on_chunk(mcapiConnection *UNUSED(conn), mcapiChunkAndLightDataPacket* packe
 
 void on_unload_chunk(mcapiConnection *, mcapiUnloadChunk *p) {
   DEBUG("unload chunk cx: %d cz: %d", p->cx, p->cz);
+  world_destroy_chunk(&game.world, p->cx, p->cz);
 }
 
 void on_light(mcapiConnection *UNUSED(conn), mcapiUpdateLightPacket *packet) {
@@ -830,52 +853,51 @@ uint16_t add_file_texture_to_image(const char *fname, unsigned char *texture_she
 void on_add_entity(mcapiConnection*, mcapiAddEntityPacket *p) {
   DEBUG("add_entity id: %d type %d x %.2f y %.2f z %.2f pitch %d yaw %d yaw_head %d data %d vx %d vy %d vz %d",
     p->id, p->type, p->x, p->y, p->z, p->pitch, p->yaw, p->yaw_head, p->data, p->vx, p->vy, p->vz);
+  Entity *entity = calloc(1, sizeof(Entity));
+  entity->id = p->id;
+  entity->type = p->type;
+  entity->x = p->x;
+  entity->y = p->y;
+  entity->z = p->z;
+  world_add_entity(&game.world, entity);
 }
 
 void on_update_entity_pos(mcapiConnection*, mcapiUpdateEntityPositionPacket *p) {
-  // int id;
-  // short dx;
-  // short dy;
-  // short dz;
-  // bool on_ground;
-
-  DEBUG("update_entity_pos id: %d dx: %d dy: %d dz: %d on_ground: %d",
-    p->id, p->dx, p->dy, p->dz, p->on_ground);
+  // DEBUG("update_entity_pos id: %d dx: %d dy: %d dz: %d on_ground: %d",
+  //   p->id, p->dx, p->dy, p->dz, p->on_ground);
+  Entity *entity = world_entity(&game.world, p->id);
+  if (entity != NULL) {
+    entity->x += p->dx / 4096.0;
+    entity->y += p->dy / 4096.0;
+    entity->z += p->dz / 4096.0;
+  }
 }
 
 void on_update_entity_pos_rot(mcapiConnection*, mcapiUpdateEntityPositionRotationPacket *p) {
-  // int id;
-  // short dx;
-  // short dy;
-  // short dz;
-  // uint8_t pitch;
-  // uint8_t yaw;
-  // bool on_ground;
-
-  DEBUG("update_entity_pos_rot id: %d dx: %d dy: %d dz: %d pitch: %d, yaw: %d on_ground: %d",
-    p->id, p->dx, p->dy, p->dz, p->pitch, p->yaw, p->on_ground);
+  // DEBUG("update_entity_pos_rot id: %d dx: %d dy: %d dz: %d pitch: %d, yaw: %d on_ground: %d",
+  //   p->id, p->dx, p->dy, p->dz, p->pitch, p->yaw, p->on_ground);
+  Entity *entity = world_entity(&game.world, p->id);
+  if (entity != NULL) {
+    entity->x += p->dx / 4096.0;
+    entity->y += p->dy / 4096.0;
+    entity->z += p->dz / 4096.0;
+  }
 }
 
 void on_teleport_entity(mcapiConnection*, mcapiTeleportEntityPacket *p) {
-  // int id;
-  // double x;
-  // double y;
-  // double z;
-  // double vx;
-  // double vy;
-  // double vz;
-  // float yaw;
-  // float pitch;
-  // bool on_ground;
-
-  DEBUG("teleport_entity id: %d x: %.2f y: %.2f z: %.2f vx: %.2f vy: %.2f vz: %.2f yaw: %.2f pitch: %.2f on_ground: %d",
-    p->id, p->x, p->y, p->z, p->vx, p->vy, p->vz, p->yaw, p->pitch, p->on_ground);
+  // DEBUG("teleport_entity id: %d x: %.2f y: %.2f z: %.2f vx: %.2f vy: %.2f vz: %.2f yaw: %.2f pitch: %.2f on_ground: %d",
+  //   p->id, p->x, p->y, p->z, p->vx, p->vy, p->vz, p->yaw, p->pitch, p->on_ground);
+  Entity *entity = world_entity(&game.world, p->id);
+  if (entity != NULL) {
+    entity->x = p->x;
+    entity->y = p->y;
+    entity->z = p->z;
+  }
 }
 
 void on_remove_entities(mcapiConnection *, mcapiRemoveEntitiesPacket *p) {
-  DEBUG("remove_entities count: %d", p->entity_count);
   for (int i = 0; i < p->entity_count; i++) {
-    DEBUG("removed entities[%d]: %d", i, p->entity_ids[i]);
+    world_destroy_entity(&game.world, p->entity_ids[i]);
   }
 }
 
@@ -976,23 +998,6 @@ void chunk_renderer_init() {
     }
   );
 
-  // WGPUBuffer buffer = frmwrk_device_create_buffer_init(
-  //   game.device,
-  //   &(const frmwrk_buffer_init_descriptor){
-  //     .label = "Texture Buffer",
-  //     .content = (void *)game.texture_sheet,
-  //     .content_size = TEXTURE_SIZE * TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_TILES * 4,
-  //     .usage = WGPUBufferUsage_CopySrc,
-  //   }
-  // );
-
-  // WGPUImageCopyBuffer image_copy_buffer = {
-  //   .buffer = buffer,
-  //   .layout = {
-  //     .bytesPerRow = TEXTURE_SIZE * TEXTURE_TILES * 4,
-  //     .rowsPerImage = TEXTURE_SIZE * TEXTURE_TILES,
-  //   },
-  // };
   WGPUImageCopyTexture image_copy_texture = {
     .texture = texture,
   };
@@ -1546,16 +1551,6 @@ void block_selected_renderer_init() {
     frmwrk_load_shader_module(game.device, "block_outline.wgsl");
   assert(game.block_selected_renderer.shader_module);
 
-  // game.sky_renderer.uniform_buffer = frmwrk_device_create_buffer_init(
-  //   game.device,
-  //   &(const frmwrk_buffer_init_descriptor){
-  //     .label = "Uniform Buffer",
-  //     .content = (void *)&game.sky_renderer.uniforms,
-  //     .content_size = sizeof(game.sky_renderer.uniforms),
-  //     .usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst,
-  //   }
-  // );
-
   game.block_selected_renderer.uniform_buffer = frmwrk_device_create_buffer_init(
     game.device,
     &(const frmwrk_buffer_init_descriptor){
@@ -1761,12 +1756,6 @@ void block_selected_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
   int tx = floor(game.block_selected_renderer.uniforms.position[0]);
   int ty = floor(game.block_selected_renderer.uniforms.position[1]);
   int tz = floor(game.block_selected_renderer.uniforms.position[2]);
-  // DEBUG("Target block material %d location %d %d %d", material, tx, ty, tz)
-  // printf("name: ");
-  // print_string(game.block_info[material].name);
-  // printf(" type: ");
-  // print_string(game.block_info[material].type);
-  // printf("\n");
 
   if (game.block_breaking_start != 0 && (tx != game.block_breaking_position[0] || ty != game.block_breaking_position[1] || tz != game.block_breaking_position[2])) {
     mcapi_send_player_action(game.conn, (mcapiPlayerActionPacket){
@@ -1800,6 +1789,226 @@ void block_selected_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
   wgpuRenderPassEncoderDraw(render_pass_encoder, 18 * 4 * 2, 1, 0, 0);
 }
 
+void entity_renderer_init() {
+  game.entity_renderer.shader_module =
+    frmwrk_load_shader_module(game.device, "entity.wgsl");
+  assert(game.entity_renderer.shader_module);
+
+  game.entity_renderer.uniform_buffer = frmwrk_device_create_buffer_init(
+    game.device,
+    &(const frmwrk_buffer_init_descriptor){
+      .label = "Entity Uniform Buffer",
+      .content = (void *)&game.entity_renderer.uniforms,
+      .content_size = sizeof(game.entity_renderer.uniforms),
+      .usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst,
+    }
+  );
+
+  float vertices[18 * 4 * 6];
+  int i = 0;
+  float s = 0.5;
+  for (int d = 0; d <= 2; d++) {
+    for (int p = 0; p <= 1; p++) {
+      for (int p1 = 0; p1 <= 1; p1++) {
+        for (int p2 = 0; p2 <= 1; p2++) {
+          int d1 = p1 == 1 ? (d + 1) % 3 : (d + 2) % 3;
+          int d2 = p1 == 0 ? (d + 1) % 3 : (d + 2) % 3;
+          vertices[i + d] = p;
+          vertices[i + d1] = p1;
+          vertices[i + d2] = p2;
+          i += 3;
+          vertices[i + d] = p;
+          vertices[i + d1] = p1;
+          vertices[i + d2] = p2 == 1 ? p2 - s : s;
+          i += 3;
+          vertices[i + d] = p;
+          vertices[i + d1] = 1 - p1;
+          vertices[i + d2] = p2 == 1 ? p2 - s : s;
+          i += 3;
+          vertices[i + d] = p;
+          vertices[i + d1] = p1;
+          vertices[i + d2] = p2;
+          i += 3;
+          vertices[i + d] = p;
+          vertices[i + d1] = 1 - p1;
+          vertices[i + d2] = p2 == 1 ? p2 - s : s;
+          i += 3;
+          vertices[i + d] = p;
+          vertices[i + d1] = 1 - p1;
+          vertices[i + d2] = p2;
+          i += 3;
+        }
+      }
+    }
+  }
+
+  game.entity_renderer.vertex_buffer = frmwrk_device_create_buffer_init(
+    game.device,
+    &(const frmwrk_buffer_init_descriptor){
+      .label = "Entity Vertex Buffer",
+      .content = (void *)vertices,
+      .content_size = sizeof(vertices),
+      .usage = WGPUBufferUsage_Vertex,
+    }
+  );
+
+  game.entity_renderer.instance_buffer = frmwrk_device_create_buffer_init(
+    game.device,
+    &(const frmwrk_buffer_init_descriptor){
+      .label = "Entity Instance Buffer",
+      .content = game.entity_renderer.instance_data,
+      .content_size = sizeof(game.entity_renderer.instance_data),
+      .usage = WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst,
+    }
+  );
+
+  WGPUBindGroupLayoutDescriptor bgl_desc = {
+    .entryCount = 1,
+    .entries = (WGPUBindGroupLayoutEntry[]){
+      {
+        .binding = 0,
+        .visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment,
+        .buffer = {
+          .type = WGPUBufferBindingType_Uniform,
+        },
+      },
+    },
+  };
+
+  WGPUBindGroupLayout bgl = wgpuDeviceCreateBindGroupLayout(game.device, &bgl_desc);
+  WGPUBindGroupDescriptor bg_desc = {
+    .layout = bgl,
+    .entryCount = 1,
+    .entries = (WGPUBindGroupEntry[]){
+      {
+        .binding = 0,
+        .buffer = game.entity_renderer.uniform_buffer,
+        .size = sizeof(game.entity_renderer.uniforms),
+      },
+    },
+  };
+  game.entity_renderer.bind_group = wgpuDeviceCreateBindGroup(game.device, &bg_desc);
+
+  game.entity_renderer.pipeline_layout = wgpuDeviceCreatePipelineLayout(
+    game.device,
+    &(const WGPUPipelineLayoutDescriptor){
+      .label = "Entity Pipeline Layout",
+      .bindGroupLayoutCount = 1,
+      .bindGroupLayouts = (const WGPUBindGroupLayout[]){
+        bgl,
+      },
+    }
+  );
+  assert(game.entity_renderer.pipeline_layout);
+
+  game.entity_renderer.render_pipeline = wgpuDeviceCreateRenderPipeline(
+    game.device,
+    &(const WGPURenderPipelineDescriptor){
+      .label = "Entity Render Pipeline",
+      .layout = game.entity_renderer.pipeline_layout,
+      .vertex = (const WGPUVertexState){
+        .module = game.entity_renderer.shader_module,
+        .entryPoint = "vs_main",
+        .bufferCount = 2,
+        .buffers = (const WGPUVertexBufferLayout[]){
+          {
+            .arrayStride = 3 * sizeof(float),
+            .stepMode = WGPUVertexStepMode_Vertex,
+            .attributeCount = 1,
+            .attributes = (WGPUVertexAttribute[]){
+              {.format = WGPUVertexFormat_Float32x3, .offset = 0, .shaderLocation = 0},
+            },
+          },
+          {
+            .arrayStride = sizeof(EntityInstance),
+            .stepMode = WGPUVertexStepMode_Instance,
+            .attributeCount = 1,
+            .attributes = (WGPUVertexAttribute[]){
+              {.format = WGPUVertexFormat_Float32x3, .offset = 0, .shaderLocation = 1},
+            },
+          },
+        },
+      },
+      .fragment = &(const WGPUFragmentState){
+        .module = game.entity_renderer.shader_module,
+        .entryPoint = "fs_main",
+        .targetCount = 1,
+        .targets = (const WGPUColorTargetState[]){
+          (const WGPUColorTargetState){
+            .format = game.surface_capabilities.formats[0],
+            .writeMask = WGPUColorWriteMask_All,
+          },
+        },
+      },
+      .primitive = (const WGPUPrimitiveState){
+        .topology = WGPUPrimitiveTopology_TriangleList,
+      },
+      .multisample = (const WGPUMultisampleState){
+        .count = 1,
+        .mask = 0xFFFFFFFF,
+      },
+      .depthStencil = &(WGPUDepthStencilState){
+        .depthWriteEnabled = true,
+        .depthCompare = WGPUCompareFunction_LessEqual,
+        .format = WGPUTextureFormat_Depth24Plus,
+        .stencilBack = (WGPUStencilFaceState){
+          .compare = WGPUCompareFunction_Always,
+          .failOp = WGPUStencilOperation_Replace,
+          .depthFailOp = WGPUStencilOperation_Replace,
+          .passOp = WGPUStencilOperation_Replace,
+        },
+        .stencilFront = (WGPUStencilFaceState){
+          .compare = WGPUCompareFunction_Always,
+          .failOp = WGPUStencilOperation_Replace,
+          .depthFailOp = WGPUStencilOperation_Replace,
+          .passOp = WGPUStencilOperation_Replace,
+        },
+      },
+    }
+  );
+  assert(game.entity_renderer.render_pipeline);
+}
+
+void entity_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
+  // Interpolate between last and current position for smooth movement
+  vec3 position;
+  glm_vec3_lerp(game.last_position, game.position, (game.current_time - game.last_tick_time) * TICKS_PER_SECOND, position);
+  vec3 eye = {position[0], position[1] + game.eye_height, position[2]};
+
+  vec3 center;
+  glm_vec3_add(eye, game.look, center);
+
+  mat4 view;
+  glm_lookat(eye, center, game.up, view);
+  memcpy(&game.entity_renderer.uniforms.view, view, sizeof(view));
+
+  mat4 projection;
+  glm_perspective(
+    GLM_PI_2, (float)game.config.width / (float)game.config.height, 0.01f, 100.0f, projection
+  );
+  memcpy(&game.entity_renderer.uniforms.projection, projection, sizeof(projection));
+
+  int instance_count = 0;
+  for (int i = 0; i < MAX_ENTITIES; i++) {
+    Entity *entity = game.world.entities[i];
+    if (entity == NULL) {
+      continue;
+    }
+    game.entity_renderer.instance_data[instance_count].position[0] = entity->x;
+    game.entity_renderer.instance_data[instance_count].position[1] = entity->y;
+    game.entity_renderer.instance_data[instance_count].position[2] = entity->z;
+    instance_count++;
+    // DEBUG("Drawing entity %d at %.2f %.2f %.2f", entity->id, entity->x, entity->y, entity->z);
+  }
+  wgpuQueueWriteBuffer(game.queue, game.entity_renderer.uniform_buffer, 0, &game.entity_renderer.uniforms, sizeof(game.entity_renderer.uniforms));
+  wgpuQueueWriteBuffer(game.queue, game.entity_renderer.instance_buffer, 0, game.entity_renderer.instance_data, instance_count*sizeof(EntityInstance));
+  wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, game.entity_renderer.bind_group, 0, NULL);
+  wgpuRenderPassEncoderSetPipeline(render_pass_encoder, game.entity_renderer.render_pipeline);
+  wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, game.entity_renderer.vertex_buffer, 0, WGPU_WHOLE_SIZE);
+  wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 1, game.entity_renderer.instance_buffer, 0, WGPU_WHOLE_SIZE);
+  wgpuRenderPassEncoderDraw(render_pass_encoder, 18 * 4 * 2, instance_count, 0, 0);
+}
+
 void read_json_arr_as_vec4(vec4 dst, yyjson_val * src) {
   if (src) {
     dst[0] = yyjson_get_num(yyjson_arr_get(src, 0));
@@ -1821,12 +2030,6 @@ uint16_t lookup_model_texture(yyjson_mut_val * textures, const char* texture_nam
   }
 
   if (texture_name[0] == '#') {
-    // if (!strcmp(texture_name, "#overlay")) {
-    //   yyjson_val* overlay = yyjson_obj_get(textures, "overlay");
-    //   if (overlay) {
-    //     DEBUG("Looking up overlay: %s", overlay->valuestring);
-    //   }
-    // }
     texture_name = yyjson_mut_get_str(yyjson_mut_obj_get(textures, texture_name + 1));
     if (strncmp(texture_name, "minecraft:", 10) == 0) {
       texture_name = texture_name + 10;
@@ -1838,7 +2041,6 @@ uint16_t lookup_model_texture(yyjson_mut_val * textures, const char* texture_nam
     uint8_t len = texture_cache.buf.buffer.ptr[i];
     uint16_t texture_index = (texture_cache.buf.buffer.ptr[i-2] << 8) + texture_cache.buf.buffer.ptr[i-1];
     char* str = (char*)texture_cache.buf.buffer.ptr + i - 3 - len + 1;
-    // DEBUG("Loop i=%d len=%d ind=%d str=%s name=%s\n", i, len, texture_index, str, texture_name);
     if (len - 1 == strlen(texture_name) && strncmp(str, texture_name, MIN(len, strlen(texture_name))) == 0) {
       found_index = texture_index;
       break;
@@ -1901,7 +2103,6 @@ int add_elements_to_blockinfo(BlockInfo* info, yyjson_val* elements, yyjson_mut_
   } else {
     info->mesh.elements = calloc(info->mesh.num_elements, sizeof(MeshCuboid));
   }
-  // DEBUG("Elements for %s: %d", info->name, info->mesh.num_elements);
   if (info->mesh.num_elements == 0) {
     return 0;
   }
@@ -2124,7 +2325,6 @@ void load_variant_state(yyjson_val* state, BlockInfo* info, yyjson_val* variants
   yyjson_val* state_id = yyjson_obj_get(state, "id");
   yyjson_val* properties = yyjson_obj_get(state, "properties");
 
-  // New plan
   // Iterate through variants
   // Parse the object key for property values "name=value,name=value,...,name=value"
   // For each name, make sure properties has the same property value
@@ -2326,7 +2526,7 @@ void init_glfw() {
   if (!glfwInit()) exit(EXIT_FAILURE);
 
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-  game.window = glfwCreateWindow(960, 720, "cmc!!!!!!!!!!!!!!!", NULL, NULL);
+  game.window = glfwCreateWindow(960, 720, "cmc", NULL, NULL);
   assert(game.window);
 
   glfwSetKeyCallback(game.window, handle_glfw_key);
@@ -2659,6 +2859,7 @@ int main(int argc, char *argv[]) {
   block_selected_renderer_init();
   chunk_renderer_init();
   sky_renderer_init();
+  entity_renderer_init();
 
   game.block_overlay_vertex_buffer = frmwrk_device_create_buffer_init(
     game.device,
@@ -2776,6 +2977,7 @@ int main(int argc, char *argv[]) {
     sky_renderer_render(render_pass_encoder);
     chunk_renderer_render(render_pass_encoder);
     block_selected_renderer_render(render_pass_encoder);
+    entity_renderer_render(render_pass_encoder);
 
     wgpuRenderPassEncoderEnd(render_pass_encoder);
 

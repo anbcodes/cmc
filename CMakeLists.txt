@@ -13,10 +13,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_executable(cmc src/main.c
   src/framework.c
   src/chunk.c
-#  src/mcapi.c
+  src/entity.c
+  src/world.c
   src/nbt.c
   src/datatypes.c
-  src/cJSON.c
   src/lodepng/lodepng.c
   src/mcapi/base.c
   src/mcapi/chunk.c
