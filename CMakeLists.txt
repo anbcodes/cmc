@@ -17,6 +17,8 @@ add_executable(cmc src/main.c
   src/world.c
   src/nbt.c
   src/datatypes.c
+  src/texture_sheet.c
+  src/models.c
   src/lodepng/lodepng.c
   src/mcapi/base.c
   src/mcapi/chunk.c
