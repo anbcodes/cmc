@@ -9,6 +9,7 @@
 #include <yyjson.h>
 
 #include "cglm/mat4.h"
+#include "entity.h"
 #include "logging.h"
 #include "world.h"
 #include "datatypes.h"
@@ -645,7 +646,8 @@ void on_add_entity(mcapiConnection*, mcapiAddEntityPacket *p) {
   entity->pos[0] = p->x;
   entity->pos[1] = p->y;
   entity->pos[2] = p->z;
-  world_add_entity(&game.world, entity);
+  int index = world_add_entity(&game.world, entity);
+  entity_update_instance_buffer(entity, index, game.queue, game.entity_renderer.instance_buffer);
 }
 
 void on_update_entity_pos(mcapiConnection*, mcapiUpdateEntityPositionPacket *p) {
@@ -654,6 +656,7 @@ void on_update_entity_pos(mcapiConnection*, mcapiUpdateEntityPositionPacket *p) 
   Entity *entity = world_entity(&game.world, p->id);
   if (entity != NULL) {
     entity_move_relative(entity, (vec3){p->dx / 4096.0, p->dy / 4096.0, p->dz / 4096.0});
+    entity_update_instance_buffer(entity, entity->index, game.queue, game.entity_renderer.instance_buffer);
   }
 }
 
@@ -663,6 +666,7 @@ void on_update_entity_pos_rot(mcapiConnection*, mcapiUpdateEntityPositionRotatio
   Entity *entity = world_entity(&game.world, p->id);
   if (entity != NULL) {
     entity_move_relative(entity, (vec3){p->dx / 4096.0, p->dy / 4096.0, p->dz / 4096.0});
+    entity_update_instance_buffer(entity, entity->index, game.queue, game.entity_renderer.instance_buffer);
   }
 }
 
@@ -672,6 +676,7 @@ void on_teleport_entity(mcapiConnection*, mcapiTeleportEntityPacket *p) {
   Entity *entity = world_entity(&game.world, p->id);
   if (entity != NULL) {
     entity_move(entity, (vec3){p->x, p->y, p->z});
+    entity_update_instance_buffer(entity, entity->index, game.queue, game.entity_renderer.instance_buffer);
   }
 }
 
@@ -1702,9 +1707,12 @@ void entity_renderer_init() {
           {
             .arrayStride = sizeof(EntityInstance),
             .stepMode = WGPUVertexStepMode_Instance,
-            .attributeCount = 1,
+            .attributeCount = 4,
             .attributes = (WGPUVertexAttribute[]){
               {.format = WGPUVertexFormat_Float32x3, .offset = 0, .shaderLocation = 1},
+              {.format = WGPUVertexFormat_Float32x3, .offset = 3 * sizeof(float), .shaderLocation = 2},
+              {.format = WGPUVertexFormat_Float32, .offset = 6 * sizeof(float), .shaderLocation = 3},
+              {.format = WGPUVertexFormat_Float32, .offset = 7 * sizeof(float), .shaderLocation = 4},
             },
           },
         },
@@ -1767,24 +1775,25 @@ void entity_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
     GLM_PI_2, (float)game.config.width / (float)game.config.height, 0.01f, 100.0f, projection
   );
   memcpy(&game.entity_renderer.uniforms.projection, projection, sizeof(projection));
+  game.entity_renderer.uniforms.time = game.current_time;
 
-  int instance_count = 0;
-  for (int i = 0; i < MAX_ENTITIES; i++) {
-    Entity *entity = game.world.entities[i];
-    if (entity == NULL) {
-      continue;
-    }
-    glm_vec3_lerp(entity->last_pos, entity->pos, MIN(1, (game.current_time - entity->last_pos_time) / entity->delta_time), game.entity_renderer.instance_data[instance_count].position);
-    instance_count++;
-    // DEBUG("Drawing entity %d at %.2f %.2f %.2f", entity->id, entity->x, entity->y, entity->z);
-  }
+  // int instance_count = 0;
+  // for (int i = 0; i < MAX_ENTITIES; i++) {
+  //   Entity *entity = game.world.entities[i];
+  //   if (entity == NULL) {
+  //     continue;
+  //   }
+  //   // glm_vec3_lerp(entity->last_pos, entity->pos, MIN(1, (game.current_time - entity->last_pos_time) / entity->delta_time), game.entity_renderer.instance_data[instance_count].position);
+  //   instance_count++;
+  //   // DEBUG("Drawing entity %d at %.2f %.2f %.2f", entity->id, entity->x, entity->y, entity->z);
+  // }
   wgpuQueueWriteBuffer(game.queue, game.entity_renderer.uniform_buffer, 0, &game.entity_renderer.uniforms, sizeof(game.entity_renderer.uniforms));
-  wgpuQueueWriteBuffer(game.queue, game.entity_renderer.instance_buffer, 0, game.entity_renderer.instance_data, instance_count*sizeof(EntityInstance));
+  // wgpuQueueWriteBuffer(game.queue, game.entity_renderer.instance_buffer, 0, game.entity_renderer.instance_data, game.entity_count*sizeof(EntityInstance));
   wgpuRenderPassEncoderSetBindGroup(render_pass_encoder, 0, game.entity_renderer.bind_group, 0, NULL);
   wgpuRenderPassEncoderSetPipeline(render_pass_encoder, game.entity_renderer.render_pipeline);
   wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 0, game.entity_renderer.vertex_buffer, 0, WGPU_WHOLE_SIZE);
   wgpuRenderPassEncoderSetVertexBuffer(render_pass_encoder, 1, game.entity_renderer.instance_buffer, 0, WGPU_WHOLE_SIZE);
-  wgpuRenderPassEncoderDraw(render_pass_encoder, 18 * 4 * 2, instance_count, 0, 0);
+  wgpuRenderPassEncoderDraw(render_pass_encoder, 18 * 4 * 2, game.world.entity_count, 0, 0);
 }
 
 void init_glfw() {

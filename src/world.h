@@ -9,6 +9,7 @@
 
 typedef struct World {
   Chunk *chunks[MAX_CHUNKS];
+  int entity_count;
   Entity *entities[MAX_ENTITIES];
 } World;
 

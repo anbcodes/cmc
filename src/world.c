@@ -87,6 +87,7 @@ int world_add_entity(World *world, Entity *entity) {
     if (world->entities[i] != NULL && world->entities[i]->id == entity->id) {
       entity_destroy(world->entities[i]);
       world->entities[i] = entity;
+      entity->index = i;
       return i;
     }
   }
@@ -94,6 +95,8 @@ int world_add_entity(World *world, Entity *entity) {
   for (int i = 0; i < MAX_ENTITIES; i += 1) {
     if (world->entities[i] == NULL) {
       world->entities[i] = entity;
+      entity->index = i;
+      world->entity_count++;
       return i;
     }
   }
@@ -108,6 +111,7 @@ void world_destroy_entity(World *world, int id) {
     if (world->entities[i] != NULL && world->entities[i]->id == id) {
       entity_destroy(world->entities[i]);
       world->entities[i] = NULL;
+      world->entity_count--;
     }
   }
 }

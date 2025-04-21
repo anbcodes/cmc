@@ -66,12 +66,8 @@ typedef struct BlockSelectedRenderer {
 typedef struct EntityUniforms {
   mat4 view;
   mat4 projection;
-  vec3 position;
+  float time;
 } EntityUniforms;
-
-typedef struct {
-    float position[3];
-} EntityInstance;
 
 typedef struct EntityRenderer {
   WGPUShaderModule shader_module;

@@ -18,6 +18,15 @@ void entity_move(Entity *entity, vec3 to) {
   entity->last_pos_time = glfwGetTime();
 }
 
+void entity_update_instance_buffer(Entity *entity, int index, WGPUQueue queue, WGPUBuffer instance_buffer) {
+  EntityInstance entity_instance;
+  glm_vec3_copy(entity->pos, entity_instance.pos);
+  glm_vec3_copy(entity->last_pos, entity_instance.last_pos);
+  entity_instance.last_pos_time = entity->last_pos_time;
+  entity_instance.delta_time = entity->delta_time;
+  wgpuQueueWriteBuffer(queue, instance_buffer, sizeof(EntityInstance) * index, &entity_instance, sizeof(EntityInstance));
+}
+
 void entity_move_relative(Entity *entity, vec3 delta) {
   vec3 to;
   glm_vec3_add(entity->pos, delta, to);
