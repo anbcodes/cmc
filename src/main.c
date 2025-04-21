@@ -641,9 +641,10 @@ void on_add_entity(mcapiConnection*, mcapiAddEntityPacket *p) {
   Entity *entity = calloc(1, sizeof(Entity));
   entity->id = p->id;
   entity->type = p->type;
-  entity->x = p->x;
-  entity->y = p->y;
-  entity->z = p->z;
+  glm_vec3_copy(entity->pos, entity->last_pos);
+  entity->pos[0] = p->x;
+  entity->pos[1] = p->y;
+  entity->pos[2] = p->z;
   world_add_entity(&game.world, entity);
 }
 
@@ -652,9 +653,7 @@ void on_update_entity_pos(mcapiConnection*, mcapiUpdateEntityPositionPacket *p) 
   //   p->id, p->dx, p->dy, p->dz, p->on_ground);
   Entity *entity = world_entity(&game.world, p->id);
   if (entity != NULL) {
-    entity->x += p->dx / 4096.0;
-    entity->y += p->dy / 4096.0;
-    entity->z += p->dz / 4096.0;
+    entity_move_relative(entity, (vec3){p->dx / 4096.0, p->dy / 4096.0, p->dz / 4096.0});
   }
 }
 
@@ -663,9 +662,7 @@ void on_update_entity_pos_rot(mcapiConnection*, mcapiUpdateEntityPositionRotatio
   //   p->id, p->dx, p->dy, p->dz, p->pitch, p->yaw, p->on_ground);
   Entity *entity = world_entity(&game.world, p->id);
   if (entity != NULL) {
-    entity->x += p->dx / 4096.0;
-    entity->y += p->dy / 4096.0;
-    entity->z += p->dz / 4096.0;
+    entity_move_relative(entity, (vec3){p->dx / 4096.0, p->dy / 4096.0, p->dz / 4096.0});
   }
 }
 
@@ -674,9 +671,7 @@ void on_teleport_entity(mcapiConnection*, mcapiTeleportEntityPacket *p) {
   //   p->id, p->x, p->y, p->z, p->vx, p->vy, p->vz, p->yaw, p->pitch, p->on_ground);
   Entity *entity = world_entity(&game.world, p->id);
   if (entity != NULL) {
-    entity->x = p->x;
-    entity->y = p->y;
-    entity->z = p->z;
+    entity_move(entity, (vec3){p->x, p->y, p->z});
   }
 }
 
@@ -1779,9 +1774,7 @@ void entity_renderer_render(WGPURenderPassEncoder render_pass_encoder) {
     if (entity == NULL) {
       continue;
     }
-    game.entity_renderer.instance_data[instance_count].position[0] = entity->x;
-    game.entity_renderer.instance_data[instance_count].position[1] = entity->y;
-    game.entity_renderer.instance_data[instance_count].position[2] = entity->z;
+    glm_vec3_lerp(entity->last_pos, entity->pos, MIN(1, (game.current_time - entity->last_pos_time) / entity->delta_time), game.entity_renderer.instance_data[instance_count].position);
     instance_count++;
     // DEBUG("Drawing entity %d at %.2f %.2f %.2f", entity->id, entity->x, entity->y, entity->z);
   }
@@ -2123,7 +2116,7 @@ int main(int argc, char *argv[]) {
 
   init_mcapi(server_ip, port, uuid, access_token, username);
   frmwrk_setup_logging(WGPULogLevel_Warn);
-  load_blocks(&game.block_info, &game.texture_sheet);
+  load_blocks(game.block_info, &game.texture_sheet);
   save_image("texture_sheet.png", game.texture_sheet.data, TEXTURE_SIZE * TEXTURE_TILES, TEXTURE_SIZE * TEXTURE_TILES);
 
   init_glfw();
