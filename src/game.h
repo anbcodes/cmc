@@ -17,6 +17,10 @@
 // #define TEXTURE_TILES 40
 #define TEXTURE_TILES 40
 
+#define MAX_ENTITY_TYPES 200
+#define ENTITY_SHEET_X 200
+#define ENTITY_SHEET_Y 200
+
 // The max number of blocks that can be being broken at the same time
 #define MAX_CONCURRENT_BLOCK_BREAKING 50
 
@@ -115,6 +119,7 @@ typedef struct Game {
   vec2 last_mouse;
   BlockInfo block_info[MAX_BLOCKS];
   BiomeInfo biome_info[MAX_BIOMES];
+  EntityInfo entity_info[MAX_ENTITY_TYPES];
   float elevation;
   float walking_speed;
   float fall_speed;
@@ -129,8 +134,10 @@ typedef struct Game {
   long time_of_day;
   World world;
   mcapiConnection *conn;
-  TextureSheet texture_sheet;
+  BlockTextureSheet texture_sheet;
   unsigned char texture_sheet_data[TEXTURE_SIZE * TEXTURE_SIZE * TEXTURE_TILES * TEXTURE_TILES * 4];
+  EntityTextureSheet entity_sheet;
+  unsigned char entity_sheet_data[ENTITY_SHEET_X * ENTITY_SHEET_Y * 4];
   double target_render_time;
   double last_render_time;
   double target_tick_time;

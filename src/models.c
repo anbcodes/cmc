@@ -1,3 +1,4 @@
+#include "models.h"
 #include <yyjson.h>
 #include <cglm/cglm.h>
 #include "chunk.h"
@@ -21,7 +22,7 @@ void read_json_arr_as_vec4(vec4 dst, yyjson_val * src) {
   }
 }
 
-uint16_t lookup_model_texture(yyjson_mut_val * textures, const char* texture_name, TextureSheet* texture_sheet) {
+uint16_t lookup_model_texture(yyjson_mut_val * textures, const char* texture_name, BlockTextureSheet* texture_sheet) {
   static WritableBuffer texture_cache = { 0 };
   if (texture_cache.buf.buffer.ptr == NULL) {
     texture_cache = create_writable_buffer(1024*4);
@@ -58,7 +59,7 @@ uint16_t lookup_model_texture(yyjson_mut_val * textures, const char* texture_nam
   }
   char fname[1000];
   snprintf(fname, 1000, "data/assets/minecraft/textures/%s.png", texture_name);
-  uint16_t index = texture_sheet_add_file(texture_sheet, fname);
+  uint16_t index = block_texture_sheet_add_file(texture_sheet, fname);
   write_buffer(&texture_cache, string_to_buffer(texture_name));
   write_byte(&texture_cache, 0);
   write_short(&texture_cache, index);
@@ -67,7 +68,7 @@ uint16_t lookup_model_texture(yyjson_mut_val * textures, const char* texture_nam
   return index;
 }
 
-void read_face_from_json(yyjson_val* faces, char* face_name, MeshFace* into, yyjson_mut_val *textures, TextureSheet* texture_sheet) {
+void read_face_from_json(yyjson_val* faces, char* face_name, MeshFace* into, yyjson_mut_val *textures, BlockTextureSheet* texture_sheet) {
   yyjson_val *face = yyjson_obj_get(faces, face_name);
 
   if (face == NULL) {
@@ -83,7 +84,7 @@ void read_face_from_json(yyjson_val* faces, char* face_name, MeshFace* into, yyj
 }
 
 // Adds the elements array to the mesh, each element is a MeshCubiod. Returns the number of elements added.
-int add_elements_to_blockinfo(BlockInfo* info, TextureSheet* texture_sheet, yyjson_val* elements, yyjson_mut_val* textures) {
+int add_elements_to_blockinfo(BlockInfo* info, BlockTextureSheet* texture_sheet, yyjson_val* elements, yyjson_mut_val* textures) {
   size_t old_count = info->mesh.num_elements;
   info->mesh.num_elements = old_count + yyjson_arr_size(elements);
   size_t start_index = 0;
@@ -161,7 +162,7 @@ yyjson_doc *load_json(const char *filename) {
   return json;
 }
 
-void load_model(yyjson_val* model_spec, BlockInfo* info, TextureSheet* texture_sheet) {
+void load_model(yyjson_val* model_spec, BlockInfo* info, BlockTextureSheet* texture_sheet) {
   char fname[1000];
 
   yyjson_val *model_name = yyjson_obj_get(model_spec, "model");
@@ -285,7 +286,7 @@ void load_model(yyjson_val* model_spec, BlockInfo* info, TextureSheet* texture_s
   }
 }
 
-void load_multipart_state(yyjson_val *state, BlockInfo* info, TextureSheet* texture_sheet, yyjson_val *multipart) {
+void load_multipart_state(yyjson_val *state, BlockInfo* info, BlockTextureSheet* texture_sheet, yyjson_val *multipart) {
   yyjson_val *properties = yyjson_obj_get(state, "properties");
 
   // Iterate through multiparts
@@ -322,7 +323,7 @@ void load_multipart_state(yyjson_val *state, BlockInfo* info, TextureSheet* text
 }
 
 
-void load_variant_state(yyjson_val* state, BlockInfo* info, TextureSheet* texture_sheet,yyjson_val* variants) {
+void load_variant_state(yyjson_val* state, BlockInfo* info, BlockTextureSheet* texture_sheet,yyjson_val* variants) {
   char key_buffer[1000];
   char value_buffer[1000];
 
@@ -400,7 +401,7 @@ void load_variant_state(yyjson_val* state, BlockInfo* info, TextureSheet* textur
   load_model(variant_value, info, texture_sheet);
 }
 
-void load_block_states(BlockInfo* block_info, TextureSheet* texture_sheet, const char* block_name, yyjson_val* block) {
+void load_block_states(BlockInfo* block_info, BlockTextureSheet* texture_sheet, const char* block_name, yyjson_val* block) {
   char fname[1000];
 
   BlockInfo shared_info = {0};
@@ -515,7 +516,7 @@ void load_block_states(BlockInfo* block_info, TextureSheet* texture_sheet, const
   yyjson_doc_free(blockstate_doc);
 }
 
-void load_blocks(BlockInfo* block_info, TextureSheet* texture_sheet) {
+void load_blocks(BlockInfo* block_info, BlockTextureSheet* texture_sheet) {
   yyjson_doc* blocks_doc = load_json("data/blocks.json");
   yyjson_val* blocks = yyjson_doc_get_root(blocks_doc);
   yyjson_val* block_name;
@@ -525,4 +526,8 @@ void load_blocks(BlockInfo* block_info, TextureSheet* texture_sheet) {
     load_block_states(block_info, texture_sheet, yyjson_get_str(block_name), block_value);
   }
   yyjson_doc_free(blocks_doc);
+}
+
+void load_entity_textures(EntityTextureSheet *texture_sheet) {
+  INFO("Starting entity loading");
 }

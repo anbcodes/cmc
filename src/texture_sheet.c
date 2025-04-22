@@ -34,7 +34,7 @@ unsigned save_image(const char *filename, unsigned char *image, unsigned width, 
   return error;
 }
 
-int texture_sheet_add_file_sub_opacity(TextureSheet *sheet, const char *fname, int sub_opacity) {
+int block_texture_sheet_add_file_sub_opacity(BlockTextureSheet *sheet, const char *fname, int sub_opacity) {
   unsigned int width, height;
   unsigned char *rgba = load_image(fname, &width, &height);
   if (rgba == NULL) {
@@ -70,6 +70,45 @@ int texture_sheet_add_file_sub_opacity(TextureSheet *sheet, const char *fname, i
   return sheet->current_id;
 }
 
-uint16_t texture_sheet_add_file(TextureSheet* sheet, const char *fname) {
-  return texture_sheet_add_file_sub_opacity(sheet, fname, 0);
+uint16_t block_texture_sheet_add_file(BlockTextureSheet* sheet, const char *fname) {
+  return block_texture_sheet_add_file_sub_opacity(sheet, fname, 0);
+}
+
+void entity_texture_sheet_add_file(EntityTextureSheet* sheet, const char* fname) {
+  unsigned int width, height;
+  unsigned char *rgba = load_image(fname, &width, &height);
+  if (rgba == NULL) {
+    return;
+  }
+
+  int endX = sheet->current_pos[0] + width;
+  if (endX > sheet->width) {
+    sheet->current_pos[0] = 0;
+    sheet->current_pos[1] += sheet->row_max_height;
+  }
+
+  if (sheet->current_pos[1] + height >= (unsigned)sheet->height) {
+    WARN("Too many textures, increase entity texture sheet size");
+    assert(false);
+  }
+
+  if (height > sheet->row_max_height) {
+    sheet->row_max_height = height;
+  }
+
+  for (unsigned int y = 0; y < height; y++) {
+    for (unsigned int x = 0; x < width; x++) {
+      int i = (y * width + x) * 4;
+      int j = ((sheet->current_pos[1] + y) * sheet->width + (sheet->current_pos[0] + x)) * 4;
+      // int j = (texture_id * TEXTURE_SIZE * TEXTURE_SIZE + y * TEXTURE_SIZE + x) * 4;
+      sheet->data[j + 0] = rgba[i + 0];
+      sheet->data[j + 1] = rgba[i + 1];
+      sheet->data[j + 2] = rgba[i + 2];
+      sheet->data[j + 3] = rgba[i + 3];
+    }
+  }
+
+  sheet->current_pos[0] += width;
+
+  free(rgba);
 }

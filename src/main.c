@@ -52,6 +52,12 @@ Game game = {
     .current_id = 1,
     .data = game.texture_sheet_data,
   },
+  .entity_sheet = {
+    .height = ENTITY_SHEET_Y,
+    .width = ENTITY_SHEET_X,
+    .current_pos = {0, 0},
+    .data = game.entity_sheet_data,
+  }
 };
 
 static void handle_request_adapter(
@@ -2120,13 +2126,16 @@ int main(int argc, char *argv[]) {
   char fname[100];
   for (int i = 0; i < 10; i++) {
     snprintf(fname, 100, "data/assets/minecraft/textures/block/destroy_stage_%d.png", i);
-    game.destroy_stage_textures[i] = texture_sheet_add_file_sub_opacity(&game.texture_sheet, fname, 64);
+    game.destroy_stage_textures[i] = block_texture_sheet_add_file_sub_opacity(&game.texture_sheet, fname, 64);
   }
 
   init_mcapi(server_ip, port, uuid, access_token, username);
   frmwrk_setup_logging(WGPULogLevel_Warn);
   load_blocks(game.block_info, &game.texture_sheet);
   save_image("texture_sheet.png", game.texture_sheet.data, TEXTURE_SIZE * TEXTURE_TILES, TEXTURE_SIZE * TEXTURE_TILES);
+  entity_register_entities(game.entity_info, &game.entity_sheet);
+  save_image("entity_sheet.png", game.entity_sheet.data, ENTITY_SHEET_X, ENTITY_SHEET_Y);
+
 
   init_glfw();
   init_surface();

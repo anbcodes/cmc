@@ -44,6 +44,7 @@ echo "Extracting reports from server jar"
 java -DbundlerMainClass=net.minecraft.data.Main -jar server$version.jar --reports
 
 cp ./generated/reports/blocks.json ../data
+cp ./generated/reports/registries.json ../data
 
 popd
 
